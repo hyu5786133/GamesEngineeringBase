@@ -8,7 +8,7 @@
 
 #include "Entity.h" // Include the Entity header
 #include "GameEntity.h" // Include the GameEntity header
-//#include "Raid.h" // Include the Raid header
+#include "Raid.h" // Include the Raid header
 
 // -----------------------------------------------------------
 
@@ -36,6 +36,7 @@ int main() {
     BackgroundEntity background({ 0, 0 });
     SpriteEntity sprite({ 100, 100 }, "..\\Resources\\hero_knight.png");
     HeroEntity hero({ 100.0f, static_cast<float>(canvas.getHeight()) - 128.0f });
+	WorldEntity world({ 64.0f, 64.0f });
 
 	float delta_time = timer.dt(); // Get the elapsed time since the last frame.
 
@@ -60,12 +61,26 @@ int main() {
         if (canvas.keyPressed('A')) input.x_ = -2.0f;
         if (canvas.keyPressed('D')) input.x_ = 2.0f;
 
+        // Hold SPACE to show the alpha masks and the water/land debug line
+        world.SetShowAlphas(canvas.keyPressed(VK_SPACE));
+
         // Draw();         
-		background.Update(delta_time);
+		//background.Update(delta_time); // Comment this out after testing the scrolling tiles
 		sprite.Update(delta_time);
 
 		hero.SetInputAxis(input);
+
+		const Vec2f previous_hero_position = hero.GetPosition();
 		hero.Update(delta_time);
+		world.Update(delta_time);
+
+		// Water/land test: the hero's feet must stay on land, otherwise undo the move
+		const Vec2f hero_feet{ hero.GetPosition().x_ + hero.GetImageWidth() / 2.0f,
+							   hero.GetPosition().y_ + hero.GetImageHeight() - 1.0f };
+		if (!world.IsLand(canvas, hero_feet))
+		{
+			hero.SetPosition(previous_hero_position);
+		}
 
 		// Keep the hero inside the canvas
 		const float maxX = static_cast<float>(canvas.getWidth()) - static_cast<float>(hero.GetImageWidth());
@@ -73,15 +88,11 @@ int main() {
 		hero.SetPosition({ std::clamp(hero.GetPosition().x_, 0.0f, maxX),
 						   std::clamp(hero.GetPosition().y_, 0.0f, maxY) });
 
-		background.Draw(canvas);
-		sprite.Draw(canvas);
+		//background.Draw(canvas); // Comment this out after testing the scrolling tiles
+        world.Draw(canvas);
+        sprite.Draw(canvas);
 		hero.Draw(canvas);
 
-        // Draw a vertical white line through the center of the canvas
-        for (int y = 0; y < canvas.getHeight(); y++)
-        {
-            canvas.draw(512, y, 255, 255, 255);
-        }
 
         // Display the frame on the screen. This must be called once the frame is finished in order to display the frame.
         canvas.present();
