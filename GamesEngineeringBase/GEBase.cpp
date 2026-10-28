@@ -8,7 +8,7 @@
 
 #include "Entity.h" // Include the Entity header
 #include "GameEntity.h" // Include the GameEntity header
-#include "Raid.h" // Include the Raid header
+#include "TileMapEntity.h" // Include the tile map (new background system)
 
 // -----------------------------------------------------------
 
@@ -19,54 +19,59 @@
 // -----------------------------------------------------------
 
 int main() {
-    
-	// Debug: Print the current working directory and check if the resource file exists
-    wchar_t cwd[MAX_PATH];
-    GetCurrentDirectoryW(MAX_PATH, cwd);
-    std::wcerr << L"CWD = " << cwd << L"\n";
-    std::cerr << "exists = " << std::filesystem::exists("..\\Resources\\hero_knight.png") << "\n";
 
-    // Create a timer object to measure time intervals.
-    GamesEngineeringBase::Timer timer; 
-    
-    // Create a canvas window with dimensions 1024x768 and title “Tiles"
-    GamesEngineeringBase::Window canvas;
-    canvas.create(1024, 768, "Tiles");
-    
-    BackgroundEntity background({ 0, 0 });
-    SpriteEntity sprite({ 100, 100 }, "..\\Resources\\hero_knight.png");
-    HeroEntity hero({ 100.0f, static_cast<float>(canvas.getHeight()) - 128.0f });
-	WorldEntity world({ 64.0f, 64.0f });
+	// Debug: print the working directory so a broken resource path is easy to spot
+	wchar_t cwd[MAX_PATH];
+	GetCurrentDirectoryW(MAX_PATH, cwd);
+	std::wcerr << L"CWD = " << cwd << L"\n";
+
+	// Create a timer object to measure time intervals.
+	GamesEngineeringBase::Timer timer;
+
+	// Create a canvas window with dimensions 1024x768 and title "Tiles"
+	GamesEngineeringBase::Window canvas;
+	canvas.create(1024, 768, "Tiles");
+
+	// Load the village layout from the map file (see MapFile.h for the format)
+	TileMapEntity world;
+
+	if (!world.LoadMap("..\\Resources\\village.map"))
+	{
+		std::cerr << "Failed to load village.map" << std::endl;
+		return 1;
+	}
+
+	// Spawn on the tile the map file specifies, standing on the bottom of it
+	HeroEntity hero({ 0.0f, 0.0f });
+
+	int spawnX = 0;
+	int spawnY = 0;
+	world.SpawnTile(spawnX, spawnY);
+
+	const float spawnPixelX = spawnX * TileMapEntity::kTile
+		+ (TileMapEntity::kTile - hero.GetImageWidth()) / 2.0f;
+	const float spawnPixelY = static_cast<float>((spawnY + 1) * TileMapEntity::kTile
+		- hero.GetImageHeight());
+
+	hero.SetPosition({ spawnPixelX, spawnPixelY });
 
 	float delta_time = timer.dt(); // Get the elapsed time since the last frame.
 
-    bool running = true; // Variable to control the main loop's running state.
+	bool running = true; // Variable to control the main loop's running state.
 
-    while (running)
-    {
-		
-        delta_time = timer.dt(); // Update the elapsed time for the current frame.
-        
-        // Check for input (key presses or window events)
-        if (canvas.keyPressed(VK_ESCAPE)) break;
+	while (running)
+	{
+		delta_time = timer.dt();
 
-        // Clear the window for the next frame rendering
-        canvas.clear(95, 200, 255);
-        
-        // Update game logic
+		if (canvas.keyPressed(VK_ESCAPE)) break;
 
-        Vec2f input{ 0, 0 };
-        if (canvas.keyPressed('W')) input.y_ = -2.0f;
-        if (canvas.keyPressed('S')) input.y_ = 2.0f;
-        if (canvas.keyPressed('A')) input.x_ = -2.0f;
-        if (canvas.keyPressed('D')) input.x_ = 2.0f;
+		canvas.clear(0, 0, 0);
 
-        // Hold SPACE to show the alpha masks and the water/land debug line
-        world.SetShowAlphas(canvas.keyPressed(VK_SPACE));
-
-        // Draw();         
-		//background.Update(delta_time); // Comment this out after testing the scrolling tiles
-		sprite.Update(delta_time);
+		Vec2f input{ 0, 0 };
+		if (canvas.keyPressed('W')) input.y_ = -2.0f;
+		if (canvas.keyPressed('S')) input.y_ = 2.0f;
+		if (canvas.keyPressed('A')) input.x_ = -2.0f;
+		if (canvas.keyPressed('D')) input.x_ = 2.0f;
 
 		hero.SetInputAxis(input);
 
@@ -74,28 +79,30 @@ int main() {
 		hero.Update(delta_time);
 		world.Update(delta_time);
 
-		// Water/land test: the hero's feet must stay on land, otherwise undo the move
+		// Impassable tiles (water, houses, tree trunks) block the hero
 		const Vec2f hero_feet{ hero.GetPosition().x_ + hero.GetImageWidth() / 2.0f,
 							   hero.GetPosition().y_ + hero.GetImageHeight() - 1.0f };
-		if (!world.IsLand(canvas, hero_feet))
+		if (world.IsBlocked(static_cast<int>(hero_feet.x_), static_cast<int>(hero_feet.y_)))
 		{
 			hero.SetPosition(previous_hero_position);
 		}
 
-		// Keep the hero inside the canvas
-		const float maxX = static_cast<float>(canvas.getWidth()) - static_cast<float>(hero.GetImageWidth());
-		const float maxY = static_cast<float>(canvas.getHeight()) - static_cast<float>(hero.GetImageHeight());
+		// Keep the hero inside the world
+		const float maxX = static_cast<float>(world.Width() * TileMapEntity::kTile) - static_cast<float>(hero.GetImageWidth());
+		const float maxY = static_cast<float>(world.Height() * TileMapEntity::kTile) - static_cast<float>(hero.GetImageHeight());
 		hero.SetPosition({ std::clamp(hero.GetPosition().x_, 0.0f, maxX),
 						   std::clamp(hero.GetPosition().y_, 0.0f, maxY) });
 
-		//background.Draw(canvas); // Comment this out after testing the scrolling tiles
-        world.Draw(canvas);
-        sprite.Draw(canvas);
+		// Camera follows the hero, clamped to the world bounds
+		const Vec2f hero_center{ hero.GetPosition().x_ + hero.GetImageWidth() / 2.0f,
+								 hero.GetPosition().y_ + hero.GetImageHeight() / 2.0f };
+		world.FollowCamera(hero_center, canvas);
+		game::camera = world.Camera();
+
+		world.Draw(canvas);
 		hero.Draw(canvas);
 
-
-        // Display the frame on the screen. This must be called once the frame is finished in order to display the frame.
-        canvas.present();
-    }
-    return 0;
+		canvas.present();
+	}
+	return 0;
 }

@@ -142,7 +142,17 @@
     <ClCompile Include="GEBase.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Camera.h" />
+    <ClInclude Include="Entity.h" />
+    <ClInclude Include="GameEntity.h" />
     <ClInclude Include="GamesEngineeringBase.h" />
+    <ClInclude Include="MapFile.h" />
+    <ClInclude Include="Raid.h" />
+    <ClInclude Include="renderer.h" />
+    <ClInclude Include="shapes.h" />
+    <ClInclude Include="TileMapEntity.h" />
+    <ClInclude Include="TileRenderer.h" />
+    <ClInclude Include="vec2f.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

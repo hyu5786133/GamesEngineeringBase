@@ -6,6 +6,11 @@
 
 #include "GameEntity.h"
 
+// ---------------------------------------------------------------------------
+// Old file from tutorial in class, kept for reference. 
+// The new background system is in TileMapEntity.
+// ---------------------------------------------------------------------------
+
 class WorldEntity : public VisualEntity {
 public:
 

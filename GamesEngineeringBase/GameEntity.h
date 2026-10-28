@@ -5,6 +5,7 @@
 #include "vec2f.h"
 #include "renderer.h"
 #include "shapes.h"
+#include "Camera.h"
 
 class SpriteEntity : public VisualEntity {
 
@@ -25,7 +26,10 @@ public:
     }
 
     virtual void Draw(GamesEngineeringBase::Window& window) override {
-        Renderer_draw_image(window, GetPosition(), image_);
+        // Entities live in world space, subtract the camera to get screen space
+        Renderer_draw_image(window,
+            { GetPosition().x_ - game::camera.x_, GetPosition().y_ - game::camera.y_ },
+            image_);
     }
 
 
@@ -58,8 +62,8 @@ public:
         SpriteEntity::Draw(window);
 
         Renderer_drawCircle(window,
-            static_cast<int>(GetPosition().x_) + GetImageWidth() / 2,
-            static_cast<int>(GetPosition().y_) + GetImageHeight() / 2,
+            static_cast<int>(GetPosition().x_ - game::camera.x_) + GetImageWidth() / 2,
+            static_cast<int>(GetPosition().y_ - game::camera.y_) + GetImageHeight() / 2,
             static_cast<int>(collisionCircle_.getRadius()),
             255, 0, 255,
             1);
