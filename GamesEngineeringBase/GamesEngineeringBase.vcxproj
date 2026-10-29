@@ -144,6 +144,7 @@
   <ItemGroup>
     <ClInclude Include="Camera.h" />
     <ClInclude Include="Entity.h" />
+    <ClInclude Include="Font5x7.h" />
     <ClInclude Include="GameEntity.h" />
     <ClInclude Include="GamesEngineeringBase.h" />
     <ClInclude Include="MapFile.h" />

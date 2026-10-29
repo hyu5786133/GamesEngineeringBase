@@ -55,8 +55,8 @@ public:
 		{ "rock_small",   62, 226,  32,  23, true },
 		{ "stump",       289, 152,  40,  28, true },
 		{ "sign",        380, 139,  26,  32, false },
-		{ "bench",       213, 239,  37,  32, false },
-		{ "table",       266, 235,  49,  39, false },
+		{ "chest",       213, 239,  37,  32, true },
+		{ "bench",       266, 235,  49,  39, false },
 		{ "logs",        418, 232,  36,  49, true },
 		{ "tall_grass",  158, 226,  31,  46, false }
 	};
@@ -105,6 +105,7 @@ public:
 			return false;
 		}
 
+		infinite_ = false;
 		width_ = map.width;
 		height_ = map.height;
 		spawnX_ = map.spawnX;
@@ -146,6 +147,28 @@ public:
 		return true;
 	}
 
+	// Switches to the endless procedural map: no file, no fixed bounds
+	void MakeInfinite(int seed)
+	{
+		LoadTilesets();
+
+		delete[] terrain_;
+		delete[] blocked_;
+		terrain_ = nullptr;
+		blocked_ = nullptr;
+
+		infinite_ = true;
+		seed_ = seed;
+		width_ = 0;
+		height_ = 0;
+		propCount_ = 0;
+		spawnX_ = -1;
+		spawnY_ = -1;
+		camera_ = { 0.0f, 0.0f };
+	}
+
+	bool IsInfinite() const { return infinite_; }
+
 	// -----------------------------------------------------------------------
 
 	void Update(float delta_time) override
@@ -155,7 +178,7 @@ public:
 
 	void Draw(GamesEngineeringBase::Window& canvas) override
 	{
-		if (width_ <= 0 || height_ <= 0)
+		if (!infinite_ && (width_ <= 0 || height_ <= 0))
 		{
 			return;
 		}
@@ -166,8 +189,8 @@ public:
 		const int viewW = static_cast<int>(canvas.getWidth());
 		const int viewH = static_cast<int>(canvas.getHeight());
 
-		const int firstX = camX / kTile;
-		const int firstY = camY / kTile;
+		const int firstX = FloorDiv(camX, kTile);
+		const int firstY = FloorDiv(camY, kTile);
 		const int cols = viewW / kTile + 2;
 		const int rows = viewH / kTile + 2;
 
@@ -177,6 +200,12 @@ public:
 			{
 				DrawTile(canvas, tx, ty, tx * kTile - camX, ty * kTile - camY);
 			}
+		}
+
+		if (infinite_)
+		{
+			DrawScatteredProps(canvas, firstX, firstY, cols, rows, camX, camY);
+			return;
 		}
 
 		// Props are sorted by their base line so lower objects are drawn in front
@@ -204,16 +233,20 @@ public:
 		const float viewW = static_cast<float>(canvas.getWidth());
 		const float viewH = static_cast<float>(canvas.getHeight());
 
-		float x = target.x_ - viewW * 0.5f;
-		float y = target.y_ - viewH * 0.5f;
+		const float x = target.x_ - viewW * 0.5f;
+		const float y = target.y_ - viewH * 0.5f;
+
+		// The endless map has no edges to clamp against
+		if (infinite_)
+		{
+			camera_ = { x, y };
+			return;
+		}
 
 		const float maxX = static_cast<float>(width_ * kTile) - viewW;
 		const float maxY = static_cast<float>(height_ * kTile) - viewH;
 
-		x = std::clamp(x, 0.0f, maxX);
-		y = std::clamp(y, 0.0f, maxY);
-
-		camera_ = { x, y };
+		camera_ = { std::clamp(x, 0.0f, maxX), std::clamp(y, 0.0f, maxY) };
 	}
 
 	Vec2f Camera() const { return camera_; }
@@ -230,6 +263,11 @@ public:
 
 	int TerrainAt(int tx, int ty) const
 	{
+		if (infinite_)
+		{
+			return InfiniteTerrain(tx, ty);
+		}
+
 		if (tx < 0 || ty < 0 || tx >= width_ || ty >= height_)
 		{
 			return kGrass;
@@ -239,8 +277,13 @@ public:
 
 	bool IsBlocked(int worldX, int worldY) const
 	{
-		const int tx = worldX / kTile;
-		const int ty = worldY / kTile;
+		const int tx = FloorDiv(worldX, kTile);
+		const int ty = FloorDiv(worldY, kTile);
+
+		if (infinite_)
+		{
+			return TerrainAt(tx, ty) == kWater;
+		}
 
 		if (tx < 0 || ty < 0 || tx >= width_ || ty >= height_)
 		{
@@ -290,6 +333,126 @@ private:
 			}
 		}
 		return -1;
+	}
+
+	// Division that rounds towards negative infinity, needed because the
+	// endless map has negative tile coordinates
+	static int FloorDiv(int value, int divisor)
+	{
+		if (value >= 0)
+		{
+			return value / divisor;
+		}
+		return -((-value + divisor - 1) / divisor);
+	}
+
+	// Stable hash of a tile position, used for the endless map
+	static unsigned int Hash01(int x, int y, int seed)
+	{
+		unsigned int h = static_cast<unsigned int>(x) * 374761393u
+			+ static_cast<unsigned int>(y) * 668265263u
+			+ static_cast<unsigned int>(seed) * 1442695041u;
+
+		h = (h ^ (h >> 13)) * 1274126177u;
+		h ^= h >> 16;
+		return h & 0xFFFFFFu;
+	}
+
+	// Smooth value noise on the integer lattice, returns 0..1
+	float ValueNoise(float x, float y) const
+	{
+		const int x0 = static_cast<int>(floorf(x));
+		const int y0 = static_cast<int>(floorf(y));
+		const float fx = x - static_cast<float>(x0);
+		const float fy = y - static_cast<float>(y0);
+
+		const float v00 = static_cast<float>(Hash01(x0, y0, seed_)) / 16777215.0f;
+		const float v10 = static_cast<float>(Hash01(x0 + 1, y0, seed_)) / 16777215.0f;
+		const float v01 = static_cast<float>(Hash01(x0, y0 + 1, seed_)) / 16777215.0f;
+		const float v11 = static_cast<float>(Hash01(x0 + 1, y0 + 1, seed_)) / 16777215.0f;
+
+		const float sx = fx * fx * (3.0f - 2.0f * fx);
+		const float sy = fy * fy * (3.0f - 2.0f * fy);
+
+		const float a = v00 + (v10 - v00) * sx;
+		const float b = v01 + (v11 - v01) * sx;
+		return a + (b - a) * sy;
+	}
+
+	// Two octaves of noise: lakes with a dirt shore, grass everywhere else
+	int InfiniteTerrain(int tx, int ty) const
+	{
+		const float n = 0.65f * ValueNoise(tx * 0.09f, ty * 0.09f)
+			+ 0.35f * ValueNoise(tx * 0.27f, ty * 0.27f);
+
+		if (n < 0.33f)
+		{
+			return kWater;
+		}
+		if (n < 0.385f)
+		{
+			return kDirt;
+		}
+		return kGrass;
+	}
+
+	unsigned int PatchHash(int tx, int ty) const
+	{
+		unsigned int h = static_cast<unsigned int>(tx) * 73856093u
+			^ static_cast<unsigned int>(ty) * 19349663u
+			^ static_cast<unsigned int>(seed_) * 83492791u;
+
+		h ^= h >> 13;
+		h *= 1274126177u;
+		return h;
+	}
+
+	// The endless map has no object list, so props are scattered by tile hash
+	void DrawScatteredProps(GamesEngineeringBase::Window& canvas,
+		int firstX, int firstY, int cols, int rows, int camX, int camY)
+	{
+		for (int ty = firstY; ty < firstY + rows; ++ty)
+		{
+			for (int tx = firstX; tx < firstX + cols; ++tx)
+			{
+				if (TerrainAt(tx, ty) != kGrass)
+				{
+					continue;
+				}
+
+				const int roll = static_cast<int>(PatchHash(tx, ty) % 1000u);
+
+				if (roll >= 55)
+				{
+					continue;
+				}
+
+				int kind = 4;
+
+				if (roll < 20)
+				{
+					kind = 4;	// pine
+				}
+				else if (roll < 34)
+				{
+					kind = 5;	// round tree
+				}
+				else if (roll < 44)
+				{
+					kind = 7;	// bush
+				}
+				else
+				{
+					kind = 11;	// rock
+				}
+
+				const SpriteDef& s = kSprites[kind];
+				const int baseY = (ty + 1) * kTile;
+
+				Renderer_blit(canvas, sprites_, s.sx, s.sy, s.w, s.h,
+					tx * kTile - camX, baseY - s.h - camY);
+			}
+		}
 	}
 
 	void Block(int x0, int y0, int x1, int y1)
@@ -463,13 +626,16 @@ private:
 	GamesEngineeringBase::Image decor_;
 	GamesEngineeringBase::Image sprites_;
 
-	unsigned char* terrain_;
-	unsigned char* blocked_;
+	unsigned char* terrain_ = nullptr;
+	unsigned char* blocked_ = nullptr;
 
-	int width_;
-	int height_;
+	int width_ = 0;
+	int height_ = 0;
 	int spawnX_ = -1;
 	int spawnY_ = -1;
+
+	bool infinite_ = false;
+	int seed_ = 0;
 
 	Prop props_[kMaxProps];
 	int propCount_ = 0;
