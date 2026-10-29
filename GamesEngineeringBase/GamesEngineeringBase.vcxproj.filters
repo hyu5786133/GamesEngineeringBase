@@ -44,6 +44,9 @@
     <ClInclude Include="renderer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="SamuraiEntity.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="shapes.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -51,6 +54,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="TileRenderer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="TrainingDummy.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="vec2f.h">

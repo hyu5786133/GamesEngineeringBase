@@ -275,11 +275,8 @@ public:
 		return terrain_[ty * width_ + tx];
 	}
 
-	bool IsBlocked(int worldX, int worldY) const
+	bool IsTileBlocked(int tx, int ty) const
 	{
-		const int tx = FloorDiv(worldX, kTile);
-		const int ty = FloorDiv(worldY, kTile);
-
 		if (infinite_)
 		{
 			return TerrainAt(tx, ty) == kWater;
@@ -297,6 +294,33 @@ public:
 		}
 
 		return blocked_[ty * width_ + tx] != 0;
+	}
+
+	bool IsBlocked(int worldX, int worldY) const
+	{
+		return IsTileBlocked(FloorDiv(worldX, kTile), FloorDiv(worldY, kTile));
+	}
+
+	// True when any tile touched by the axis aligned box is blocked
+	bool IsBoxBlocked(float left, float top, float right, float bottom) const
+	{
+		const int tx0 = FloorDiv(static_cast<int>(left), kTile);
+		const int ty0 = FloorDiv(static_cast<int>(top), kTile);
+		const int tx1 = FloorDiv(static_cast<int>(right - 1.0f), kTile);
+		const int ty1 = FloorDiv(static_cast<int>(bottom - 1.0f), kTile);
+
+		for (int ty = ty0; ty <= ty1; ++ty)
+		{
+			for (int tx = tx0; tx <= tx1; ++tx)
+			{
+				if (IsTileBlocked(tx, ty))
+				{
+					return true;
+				}
+			}
+		}
+
+		return false;
 	}
 
 	// -----------------------------------------------------------------------

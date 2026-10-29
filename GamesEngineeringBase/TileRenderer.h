@@ -75,3 +75,85 @@ inline void Renderer_draw_tile(GamesEngineeringBase::Window& canvas,
 		col * tileSize, row * tileSize, tileSize, tileSize,
 		dstX, dstY);
 }
+
+// Same as Renderer_blit but scales each source pixel up by an integer factor and
+// can mirror the sprite horizontally (used by the animated characters).
+inline void Renderer_blit_scaled(GamesEngineeringBase::Window& canvas,
+	const GamesEngineeringBase::Image& image,
+	int srcX, int srcY, int srcW, int srcH,
+	int dstX, int dstY, int scale, bool flipX)
+{
+	const unsigned char* src = image.data;
+
+	if (src == nullptr || srcW <= 0 || srcH <= 0 || scale <= 0)
+	{
+		return;
+	}
+
+	const int channels = static_cast<int>(image.channels);
+	const int imgW = static_cast<int>(image.width);
+	const int imgH = static_cast<int>(image.height);
+	const int winW = static_cast<int>(canvas.getWidth());
+	const int winH = static_cast<int>(canvas.getHeight());
+
+	for (int y = 0; y < srcH; ++y)
+	{
+		const int sy = srcY + y;
+
+		if (sy < 0 || sy >= imgH)
+		{
+			continue;
+		}
+
+		const int py0 = dstY + y * scale;
+
+		if (py0 + scale <= 0 || py0 >= winH)
+		{
+			continue;
+		}
+
+		for (int x = 0; x < srcW; ++x)
+		{
+			const int sx = srcX + (flipX ? (srcW - 1 - x) : x);
+
+			if (sx < 0 || sx >= imgW)
+			{
+				continue;
+			}
+
+			const unsigned char* p = src + (sy * imgW + sx) * channels;
+
+			if (channels == 4 && p[3] == 0)
+			{
+				continue;
+			}
+
+			const int px0 = dstX + x * scale;
+
+			if (px0 + scale <= 0 || px0 >= winW)
+			{
+				continue;
+			}
+
+			for (int oy = 0; oy < scale; ++oy)
+			{
+				const int py = py0 + oy;
+
+				if (py < 0 || py >= winH)
+				{
+					continue;
+				}
+
+				for (int ox = 0; ox < scale; ++ox)
+				{
+					const int px = px0 + ox;
+
+					if (px >= 0 && px < winW)
+					{
+						canvas.draw(px, py, const_cast<unsigned char*>(p));
+					}
+				}
+			}
+		}
+	}
+}

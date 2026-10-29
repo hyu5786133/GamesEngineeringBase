@@ -21,8 +21,8 @@ public:
 	{
 		for (int i = 0; i < kTileType; i++)
 		{
-			const std::string image_filename = "..\\Resources\\tile_" + std::to_string(i) + ".png";
-			const std::string alpha_filename = "..\\Resources\\alpha_" + std::to_string(i) + ".png";
+			const std::string image_filename = "..\\Resources\\RiverRaidAssets\\tile_" + std::to_string(i) + ".png";
+			const std::string alpha_filename = "..\\Resources\\RiverRaidAssets\\alpha_" + std::to_string(i) + ".png";
 
 			if (!tiles[i].load(image_filename))
 			{

@@ -150,9 +150,11 @@
     <ClInclude Include="MapFile.h" />
     <ClInclude Include="Raid.h" />
     <ClInclude Include="renderer.h" />
+    <ClInclude Include="SamuraiEntity.h" />
     <ClInclude Include="shapes.h" />
     <ClInclude Include="TileMapEntity.h" />
     <ClInclude Include="TileRenderer.h" />
+    <ClInclude Include="TrainingDummy.h" />
     <ClInclude Include="vec2f.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

@@ -7,6 +7,11 @@
 #include "shapes.h"
 #include "Camera.h"
 
+// ---------------------------------------------------------------------------
+// Old file, kept for reference. 
+// The new character system is in SamuraiEntity.
+// ---------------------------------------------------------------------------
+
 class SpriteEntity : public VisualEntity {
 
 public:

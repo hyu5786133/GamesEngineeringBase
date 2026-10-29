@@ -8,7 +8,8 @@
 // -----------------------------------------------------------
 
 #include "Entity.h" // Include the Entity header
-#include "GameEntity.h" // Include the GameEntity header
+#include "SamuraiEntity.h" // Include the player character
+#include "TrainingDummy.h" // Include the temporary attack target
 #include "TileMapEntity.h" // Include the tile map (background system)
 #include "Font5x7.h" // Include the bitmap font used for the FPS counter
 
@@ -21,17 +22,47 @@
 // -----------------------------------------------------------
 
 // Places the hero so its feet stand on the middle of the spawn tile
-static void PlaceHeroOnSpawn(HeroEntity& hero, const TileMapEntity& world)
+static void PlaceHeroOnSpawn(SamuraiEntity& hero, const TileMapEntity& world)
 {
 	int spawnX = 0;
 	int spawnY = 0;
 	world.SpawnTile(spawnX, spawnY);
 
-	const float x = spawnX * TileMapEntity::kTile
-		+ (TileMapEntity::kTile - hero.GetImageWidth()) / 2.0f;
-	const float y = static_cast<float>((spawnY + 1) * TileMapEntity::kTile - hero.GetImageHeight());
+	const float x = spawnX * TileMapEntity::kTile + TileMapEntity::kTile * 0.5f;
+	const float y = static_cast<float>((spawnY + 1) * TileMapEntity::kTile - 2);
 
 	hero.SetPosition({ x, y });
+	hero.Respawn();
+}
+
+// -----------------------------------------------------------
+
+// Draws a world space rectangle as a 1px outline (debug view of the body box)
+static void DrawWorldBox(GamesEngineeringBase::Window& canvas,
+	float left, float top, float right, float bottom,
+	unsigned char r, unsigned char g, unsigned char b)
+{
+	const int x0 = static_cast<int>(left - game::camera.x_);
+	const int x1 = static_cast<int>(right - game::camera.x_);
+	const int y0 = static_cast<int>(top - game::camera.y_);
+	const int y1 = static_cast<int>(bottom - game::camera.y_);
+
+	const int winW = static_cast<int>(canvas.getWidth());
+	const int winH = static_cast<int>(canvas.getHeight());
+
+	for (int x = x0; x <= x1; ++x)
+	{
+		if (x < 0 || x >= winW) continue;
+		if (y0 >= 0 && y0 < winH) canvas.draw(x, y0, r, g, b);
+		if (y1 >= 0 && y1 < winH) canvas.draw(x, y1, r, g, b);
+	}
+
+	for (int y = y0; y <= y1; ++y)
+	{
+		if (y < 0 || y >= winH) continue;
+		if (x0 >= 0 && x0 < winW) canvas.draw(x0, y, r, g, b);
+		if (x1 >= 0 && x1 < winW) canvas.draw(x1, y, r, g, b);
+	}
 }
 
 // -----------------------------------------------------------
@@ -59,8 +90,12 @@ int main() {
 		return 1;
 	}
 
-	HeroEntity hero({ 0.0f, 0.0f });
+	SamuraiEntity hero({ 0.0f, 0.0f });
 	PlaceHeroOnSpawn(hero, world);
+
+	// Temporary targets used to test the melee hit detection
+	TrainingDummy dummyA({ 784.0f, 544.0f }, 3);
+	TrainingDummy dummyB({ 368.0f, 544.0f }, 3);
 
 	float delta_time = timer.dt(); // Get the elapsed time since the last frame.
 
@@ -72,9 +107,13 @@ int main() {
 	int fpsValue = 0;
 	float msValue = 0.0f;
 
-	// Used to detect the moment '1' or '2' is pressed, not every frame they are held
+	// Edge detection for the one shot keys
 	bool keyOneDown = false;
 	bool keyTwoDown = false;
+	bool attackDown = false;
+	bool hurtDown = false;
+	bool deathDown = false;
+	bool respawnDown = false;
 
 	while (running)
 	{
@@ -104,45 +143,107 @@ int main() {
 		keyOneDown = keyOne;
 		keyTwoDown = keyTwo;
 
+		// Actions: J attack, H hurt, K die, R respawn (debug triggers until
+		// enemies and health exist)
+		const bool attackKey = canvas.keyPressed('J');
+		const bool hurtKey = canvas.keyPressed('H');
+		const bool deathKey = canvas.keyPressed('K');
+		const bool respawnKey = canvas.keyPressed('R');
+
+		if (attackKey && !attackDown) { hero.Attack(); }
+		if (hurtKey && !hurtDown) { hero.Hurt(); }
+		if (deathKey && !deathDown) { hero.Die(); }
+		if (respawnKey && !respawnDown) { PlaceHeroOnSpawn(hero, world); }
+
+		attackDown = attackKey;
+		hurtDown = hurtKey;
+		deathDown = deathKey;
+		respawnDown = respawnKey;
+
 		canvas.clear(0, 0, 0);
 
 		Vec2f input{ 0, 0 };
-		if (canvas.keyPressed('W')) input.y_ = -2.0f;
-		if (canvas.keyPressed('S')) input.y_ = 2.0f;
-		if (canvas.keyPressed('A')) input.x_ = -2.0f;
-		if (canvas.keyPressed('D')) input.x_ = 2.0f;
+		if (canvas.keyPressed('W')) input.y_ = -1.0f;
+		if (canvas.keyPressed('S')) input.y_ = 1.0f;
+		if (canvas.keyPressed('A')) input.x_ = -1.0f;
+		if (canvas.keyPressed('D')) input.x_ = 1.0f;
 
 		hero.SetInputAxis(input);
+		hero.SetRunning(canvas.keyPressed(VK_SHIFT));
 
-		const Vec2f previous_hero_position = hero.GetPosition();
+		const Vec2f previous_feet = hero.GetPosition();
 		hero.Update(delta_time);
 		world.Update(delta_time);
 
-		// Impassable tiles (water, houses, tree trunks) block the hero
-		const Vec2f hero_feet{ hero.GetPosition().x_ + hero.GetImageWidth() / 2.0f,
-							   hero.GetPosition().y_ + hero.GetImageHeight() - 1.0f };
-		if (world.IsBlocked(static_cast<int>(hero_feet.x_), static_cast<int>(hero_feet.y_)))
+		// The whole body box collides with impassable tiles
+		float left = 0.0f, top = 0.0f, right = 0.0f, bottom = 0.0f;
+		hero.BodyBox(left, top, right, bottom);
+
+		if (world.IsBoxBlocked(left, top, right, bottom))
 		{
-			hero.SetPosition(previous_hero_position);
+			hero.SetPosition(previous_feet);
 		}
 
-		// Keep the hero inside the map, the endless map has no edges
+		// Keep the hero body inside the map, the endless map has no edges
 		if (!world.IsInfinite())
 		{
-			const float maxX = static_cast<float>(world.Width() * TileMapEntity::kTile) - static_cast<float>(hero.GetImageWidth());
-			const float maxY = static_cast<float>(world.Height() * TileMapEntity::kTile) - static_cast<float>(hero.GetImageHeight());
-			hero.SetPosition({ std::clamp(hero.GetPosition().x_, 0.0f, maxX),
-							   std::clamp(hero.GetPosition().y_, 0.0f, maxY) });
+			const float halfWidth = SamuraiEntity::kBodyW * SamuraiEntity::kScale * 0.5f;
+			const float bodyHeight = SamuraiEntity::kBodyH * SamuraiEntity::kScale;
+
+			const float minX = halfWidth;
+			const float maxX = static_cast<float>(world.Width() * TileMapEntity::kTile) - halfWidth;
+			const float minY = bodyHeight;
+			const float maxY = static_cast<float>(world.Height() * TileMapEntity::kTile);
+
+			hero.SetPosition({ std::clamp(hero.GetPosition().x_, minX, maxX),
+							   std::clamp(hero.GetPosition().y_, minY, maxY) });
 		}
 
-		// Camera follows the hero, clamped to the map bounds for fixed maps
-		const Vec2f hero_center{ hero.GetPosition().x_ + hero.GetImageWidth() / 2.0f,
-								 hero.GetPosition().y_ + hero.GetImageHeight() / 2.0f };
-		world.FollowCamera(hero_center, canvas);
+		// Melee hit detection: while the blade is out, damage anything the hit
+		// box overlaps. Each swing can hit a target only once.
+		bool attack_active = false;
+		float attackLeft = 0.0f, attackTop = 0.0f, attackRight = 0.0f, attackBottom = 0.0f;
+
+		if (hero.IsAttackActive())
+		{
+			attack_active = true;
+			hero.AttackBox(attackLeft, attackTop, attackRight, attackBottom);
+
+			if (!world.IsInfinite())
+			{
+				dummyA.TryHit(hero.SwingId(), attackLeft, attackTop, attackRight, attackBottom);
+				dummyB.TryHit(hero.SwingId(), attackLeft, attackTop, attackRight, attackBottom);
+			}
+		}
+
+		dummyA.Update(delta_time);
+		dummyB.Update(delta_time);
+
+		// Camera follows the middle of the hero body
+		world.FollowCamera(hero.BodyCentre(), canvas);
 		game::camera = world.Camera();
 
 		world.Draw(canvas);
+
+		if (!world.IsInfinite())
+		{
+			dummyA.Draw(canvas);
+			dummyB.Draw(canvas);
+		}
+
 		hero.Draw(canvas);
+
+		// Hold B to see the collision box, V to see the sword hit box
+		if (canvas.keyPressed('B'))
+		{
+			hero.BodyBox(left, top, right, bottom);
+			DrawWorldBox(canvas, left, top, right, bottom, 255, 0, 255);
+		}
+
+		if (canvas.keyPressed('V') && attack_active)
+		{
+			DrawWorldBox(canvas, attackLeft, attackTop, attackRight, attackBottom, 255, 255, 0);
+		}
 
 		// FPS overlay: black shadow first so it stays readable on any terrain
 		fpsAccum += delta_time;
