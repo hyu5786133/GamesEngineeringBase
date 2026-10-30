@@ -184,3 +184,76 @@ inline void Renderer_blit_scaled(GamesEngineeringBase::Window& canvas,
 		}
 	}
 }
+
+// Draws a sprite rotated around its centre (used by the arrows, whose art is
+// drawn pointing right but which can fly in any direction). Nearest neighbour,
+// no smoothing, so it keeps the pixel look.
+inline void Renderer_blit_rotated(GamesEngineeringBase::Window& canvas,
+	const GamesEngineeringBase::Image& image,
+	int srcX, int srcY, int srcW, int srcH,
+	float centerX, float centerY, float angle, float scale)
+{
+	const unsigned char* src = image.data;
+
+	if (src == nullptr || srcW <= 0 || srcH <= 0 || scale <= 0.0f)
+	{
+		return;
+	}
+
+	const int channels = static_cast<int>(image.channels);
+	const int imgW = static_cast<int>(image.width);
+	const int imgH = static_cast<int>(image.height);
+	const int winW = static_cast<int>(canvas.getWidth());
+	const int winH = static_cast<int>(canvas.getHeight());
+
+	const int halfW = static_cast<int>(srcW * scale * 0.5f) + 1;
+	const int halfH = static_cast<int>(srcH * scale * 0.5f) + 1;
+
+	const float cosA = cosf(angle);
+	const float sinA = sinf(angle);
+
+	const float srcCenterX = srcW * 0.5f;
+	const float srcCenterY = srcH * 0.5f;
+
+	for (int dy = -halfH; dy <= halfH; ++dy)
+	{
+		const int py = static_cast<int>(centerY) + dy;
+
+		if (py < 0 || py >= winH)
+		{
+			continue;
+		}
+
+		for (int dx = -halfW; dx <= halfW; ++dx)
+		{
+			const int px = static_cast<int>(centerX) + dx;
+
+			if (px < 0 || px >= winW)
+			{
+				continue;
+			}
+
+			// Inverse rotation back into sprite space
+			const float sx = (dx * cosA + dy * sinA) / scale + srcCenterX;
+			const float sy = (-dx * sinA + dy * cosA) / scale + srcCenterY;
+
+			const int texelX = static_cast<int>(floorf(sx));
+			const int texelY = static_cast<int>(floorf(sy));
+
+			if (texelX < 0 || texelY < 0 || texelX >= srcW || texelY >= srcH)
+			{
+				continue;
+			}
+
+			const unsigned char* p = src
+				+ ((srcY + texelY) * imgW + (srcX + texelX)) * channels;
+
+			if (channels == 4 && p[3] == 0)
+			{
+				continue;
+			}
+
+			Renderer_blend_pixel(canvas, px, py, p, channels == 4 ? p[3] : 255);
+		}
+	}
+}

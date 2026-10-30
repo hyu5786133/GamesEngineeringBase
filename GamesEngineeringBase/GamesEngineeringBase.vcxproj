@@ -143,6 +143,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Camera.h" />
+    <ClInclude Include="ArrowEntity.h" />
     <ClInclude Include="Entity.h" />
     <ClInclude Include="Font5x7.h" />
     <ClInclude Include="GameEntity.h" />

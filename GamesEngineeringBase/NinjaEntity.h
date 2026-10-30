@@ -9,12 +9,18 @@
 #include <string>
 
 // ---------------------------------------------------------------------------
-// Melee enemy (yellow ninja today, blue/green later).
+// Melee enemy (yellow ninja and blue ninja).
 //
 // Same idea as the samurai: 128x128 frames, character anchored on its feet point
 // (60, 96 inside a frame), lower body collision box. Behaviour is a simple chase:
 // walk straight at the player when inside the aggro radius, stop at contact range
 // and swing; contact with the player deals damage on a cooldown.
+// 
+// Ranged enemy (green ninja).
+// 
+// The variant that draws a bow and shoots arrows at the player. Chasing behaviour
+// is similar to the melee types, but stop and shoot once the player is within 
+// the shooting range. The arrow is a separate entity, see ArrowEntity.h.
 // ---------------------------------------------------------------------------
 
 class NinjaEntity : public VisualEntity {
@@ -36,19 +42,24 @@ public:
 	// Must be smaller than the combined half widths of the two body boxes,
 	// otherwise the ninja stops just outside contact range and never hits
 	static constexpr float kStopDistance = 32.0f;
+	static constexpr float kAttackRange = 46.0f;
+	static constexpr float kAttackCooldown = 1.6f;
+	static constexpr float kRangedCooldown = 1.9f;
+	static constexpr float kShootRange = 320.0f;
 
+	// Frame counts differ per ninja type, so they are read from the loaded
+	// sheets; only playback speed and looping live here.
 	struct AnimDef {
-		int frames;
 		float fps;
 		bool loop;
 	};
 
 	static constexpr AnimDef kAnims[kAnimCount] = {
-		{  8,  8.0f, true  },	// idle
-		{ 10, 10.0f, true  },	// walk
-		{ 20, 16.0f, false },	// attack
-		{  4,  8.0f, false },	// hurt (white flash frames)
-		{ 14, 10.0f, false }	// death
+		{  8.0f, true  },	// idle
+		{ 10.0f, true  },	// walk
+		{ 16.0f, false },	// attack
+		{  8.0f, false },	// hurt (white flash frames)
+		{ 10.0f, false }	// death
 	};
 
 	NinjaEntity()
@@ -56,12 +67,19 @@ public:
 	{
 	}
 
-	void Init(const std::string& folder, const std::string& prefix, int hp, const Vec2f& feet)
+	void Init(const std::string& folder, const std::string& prefix, int hp,
+		float speed, float aggroRange, bool ranged, const Vec2f& feet)
 	{
 		SetPosition(feet);
 		hp_ = hp;
 		maxHp_ = hp;
+		speed_ = speed;
+		aggroRange_ = aggroRange;
+		ranged_ = ranged;
 		lastSwing_ = -1;
+		hitThisSwing_ = false;
+		shotPending_ = false;
+		shotFired_ = false;
 		cooldown_ = 0.0f;
 		state_ = kIdle;
 		frame_ = 0;
@@ -74,6 +92,22 @@ public:
 		Load(sheets_[kAnimAttack], base + " - attack.png");
 		Load(sheets_[kAnimHurt], base + " - Whitehit.png");
 		Load(sheets_[kAnimDeath], base + " - Death.png");
+
+		// Derive the frame counts from the sheet widths
+		for (int i = 0; i < kAnimCount; ++i)
+		{
+			frames_[i] = (sheets_[i].width > 0)
+				? static_cast<int>(sheets_[i].width) / kFrame
+				: 1;
+		}
+
+		// The blade is out in the middle of the attack animation
+		const int attackFrames = frames_[kAnimAttack];
+		attackActiveFrom_ = attackFrames * 3 / 10;
+		attackActiveTo_ = attackFrames * 6 / 10;
+
+		// Ranged types release the arrow a bit later, around the apex of the draw
+		releaseFrame_ = attackFrames * 55 / 100;
 	}
 
 	void Reset(const Vec2f& feet)
@@ -81,6 +115,9 @@ public:
 		SetPosition(feet);
 		hp_ = maxHp_;
 		lastSwing_ = -1;
+		hitThisSwing_ = false;
+		shotPending_ = false;
+		shotFired_ = false;
 		cooldown_ = 0.0f;
 		SetState(kIdle);
 	}
@@ -107,7 +144,23 @@ public:
 			return;
 		}
 
-		if (state_ == kHurt || state_ == kAttack)
+		if (state_ == kAttack)
+		{
+			// Ranged types release the arrow part way through the draw
+			if (ranged_ && !shotFired_ && frame_ >= releaseFrame_)
+			{
+				shotFired_ = true;
+				shotPending_ = true;
+			}
+
+			if (AnimFinished())
+			{
+				SetState(kIdle);
+			}
+			return;
+		}
+
+		if (state_ == kHurt)
 		{
 			if (AnimFinished())
 			{
@@ -121,38 +174,52 @@ public:
 		const float dy = target.y_ - position.y_;
 		const float distance = sqrtf(dx * dx + dy * dy);
 
-		if (distance > kAggroRange)
+		if (distance > aggroRange_)
 		{
 			SetState(kIdle);
 			return;
 		}
 
+		if (dx > 4.0f)
+		{
+			facing_ = 1;
+		}
+		else if (dx < -4.0f)
+		{
+			facing_ = -1;
+		}
+
+		if (ranged_)
+		{
+			// Stop and shoot once the player is inside the shooting range,
+			// otherwise keep closing the distance
+			if (distance <= shootRange_)
+			{
+				if (cooldown_ <= 0.0f)
+				{
+					BeginAttack();
+				}
+				else
+				{
+					SetState(kIdle);
+				}
+				return;
+			}
+
+			MoveTowards(dx, dy, distance, world, delta_time);
+			return;
+		}
+
+		// Melee types: swing instead of walking when close enough
+		if (distance <= kAttackRange && cooldown_ <= 0.0f)
+		{
+			BeginAttack();
+			return;
+		}
+
 		if (distance > kStopDistance)
 		{
-			const float inverse = 1.0f / (distance > 0.001f ? distance : 1.0f);
-			const Vec2f direction{ dx * inverse, dy * inverse };
-
-			const Vec2f previous = position;
-			Move(direction * (speed_ * delta_time));
-
-			float left = 0.0f, top = 0.0f, right = 0.0f, bottom = 0.0f;
-			BodyBox(left, top, right, bottom);
-
-			if (world.IsBoxBlocked(left, top, right, bottom))
-			{
-				SetPosition(previous);
-			}
-
-			if (direction.x_ > 0.05f)
-			{
-				facing_ = 1;
-			}
-			else if (direction.x_ < -0.05f)
-			{
-				facing_ = -1;
-			}
-
-			SetState(kWalk);
+			MoveTowards(dx, dy, distance, world, delta_time);
 		}
 		else
 		{
@@ -160,15 +227,98 @@ public:
 		}
 	}
 
-	bool TryContactDamage()
+	// Moves straight at the target, refusing moves that would enter a wall
+	void MoveTowards(float dx, float dy, float distance, const TileMapEntity& world,
+		float delta_time)
 	{
-		if (state_ == kDeath || cooldown_ > 0.0f)
+		const float inverse = 1.0f / (distance > 0.001f ? distance : 1.0f);
+		const Vec2f direction{ dx * inverse, dy * inverse };
+
+		const Vec2f previous = GetPosition();
+		Move(direction * (speed_ * delta_time));
+
+		float left = 0.0f, top = 0.0f, right = 0.0f, bottom = 0.0f;
+		BodyBox(left, top, right, bottom);
+
+		if (world.IsBoxBlocked(left, top, right, bottom))
+		{
+			SetPosition(previous);
+		}
+
+		if (direction.x_ > 0.05f)
+		{
+			facing_ = 1;
+		}
+		else if (direction.x_ < -0.05f)
+		{
+			facing_ = -1;
+		}
+
+		SetState(kWalk);
+	}
+
+	void BeginAttack()
+	{
+		hitThisSwing_ = false;
+		shotFired_ = false;
+		cooldown_ = ranged_ ? kRangedCooldown : kAttackCooldown;
+		SetState(kAttack);
+	}
+
+	// True once per ranged attack, the owner spawns the arrow when it returns true
+	bool ConsumeShot()
+	{
+		if (!shotPending_)
 		{
 			return false;
 		}
 
-		cooldown_ = 1.0f;
-		SetState(kAttack);
+		shotPending_ = false;
+		return true;
+	}
+
+	// True during the frames where the blade is out, the sword hit box is only
+	// valid then
+	bool IsAttackActive() const
+	{
+		return state_ == kAttack && frame_ >= attackActiveFrom_ && frame_ <= attackActiveTo_;
+	}
+
+	void AttackBox(float& left, float& top, float& right, float& bottom) const
+	{
+		const float halfWidth = kBodyW * kScale * 0.5f;
+		const float reach = 22.0f * kScale;
+		const float height = 22.0f * kScale;
+
+		const float x = GetPosition().x_;
+		const float y = GetPosition().y_;
+
+		bottom = y + 2.0f;
+		top = bottom - height;
+
+		const float nearEdge = halfWidth - 4.0f;
+
+		if (facing_ > 0)
+		{
+			left = x + nearEdge;
+			right = left + reach;
+		}
+		else
+		{
+			right = x - nearEdge;
+			left = right - reach;
+		}
+	}
+
+	// Returns true once per swing, so one slash cannot hit the player twice
+	bool TryDamagePlayer()
+	{
+		if (hitThisSwing_)
+		{
+			return false;
+		}
+
+		hitThisSwing_ = true;
 		return true;
 	}
 
@@ -217,6 +367,7 @@ public:
 	}
 
 	bool IsDead() const { return state_ == kDeath; }
+	bool IsRanged() const { return ranged_; }
 
 	// True once the death animation has played out, the entity can be removed
 	bool ShouldDespawn() const { return state_ == kDeath && AnimFinished(); }
@@ -251,7 +402,7 @@ private:
 	bool AnimFinished() const
 	{
 		const AnimDef& def = kAnims[CurrentAnim()];
-		return animTime_ * def.fps >= static_cast<float>(def.frames);
+		return animTime_ * def.fps >= static_cast<float>(frames_[CurrentAnim()]);
 	}
 
 	void SetState(State state)
@@ -275,11 +426,11 @@ private:
 
 		if (def.loop)
 		{
-			frame_ = frame % def.frames;
+			frame_ = frame % frames_[CurrentAnim()];
 		}
 		else
 		{
-			frame_ = std::min(frame, def.frames - 1);
+			frame_ = std::min(frame, frames_[CurrentAnim()] - 1);
 		}
 	}
 
@@ -330,6 +481,7 @@ private:
 	// -----------------------------------------------------------------------
 
 	GamesEngineeringBase::Image sheets_[kAnimCount];
+	int frames_[kAnimCount] = { 1, 1, 1, 1, 1 };
 
 	State state_ = kIdle;
 	int frame_ = 0;
@@ -337,8 +489,19 @@ private:
 	float animTime_ = 0.0f;
 	float cooldown_ = 0.0f;
 	float speed_ = 70.0f;
+	float aggroRange_ = 420.0f;
+
+	bool ranged_ = false;
+	float shootRange_ = kShootRange;
+	int releaseFrame_ = 0;
+	bool shotPending_ = false;
+	bool shotFired_ = false;
+
+	int attackActiveFrom_ = 0;
+	int attackActiveTo_ = 0;
 
 	int hp_ = 3;
 	int maxHp_ = 3;
 	int lastSwing_ = -1;
+	bool hitThisSwing_ = false;
 };

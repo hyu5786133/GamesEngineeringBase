@@ -33,32 +33,37 @@ public:
 	// Source rectangles inside assets-spritesheet-standard.png. The name is what
 	// the map file uses, solid is the default block flag (an object line can
 	// override it with "solid" or "pass").
+	//
+	// For houses solidW / solidH describe the wall base only: the roof is drawn
+	// much larger than the floor plan, so blocking the whole sprite made the
+	// houses feel far bigger than they look. 0 means "use the sprite size".
 	struct SpriteDef {
 		const char* name;
 		int sx, sy, w, h;
 		bool solid;
+		int solidW, solidH;
 	};
 
 	static constexpr int kSpriteCount = 18;
 	static constexpr SpriteDef kSprites[kSpriteCount] = {
-		{ "house_brown", 448,   2, 139, 193, true },
-		{ "house_blue",  625,  15, 192, 165, true },
-		{ "house_red",   848,  15, 192, 165, true },
-		{ "house_green", 848, 207, 192, 165, true },
-		{ "tree_pine",   342,   0,  80, 128, true },
-		{ "tree_round",  270,   1,  61,  95, true },
-		{ "tree_slim",   211,   3,  52,  92, true },
-		{ "bush_blue",     9,   8,  62,  51, false },
-		{ "bush_red",      9,  68,  62,  51, false },
-		{ "bush_leaf",    17, 249,  45,  41, false },
-		{ "rock_big",    576, 224,  39,  26, true },
-		{ "rock_small",   62, 226,  32,  23, true },
-		{ "stump",       289, 152,  40,  28, true },
-		{ "sign",        380, 139,  26,  32, false },
-		{ "chest",       213, 239,  37,  32, true },
-		{ "bench",       266, 235,  49,  39, false },
-		{ "logs",        418, 232,  36,  49, true },
-		{ "tall_grass",  158, 226,  31,  46, false }
+		{ "house_brown", 448,   2, 139, 193, true,  118, 74 },
+		{ "house_blue",  625,  15, 192, 165, true,  168, 60 },
+		{ "house_red",   848,  15, 192, 165, true,  168, 60 },
+		{ "house_green", 848, 207, 192, 165, true,  168, 60 },
+		{ "tree_pine",   342,   0,  80, 128, true,    0,  0 },
+		{ "tree_round",  270,   1,  61,  95, true,    0,  0 },
+		{ "tree_slim",   211,   3,  52,  92, true,    0,  0 },
+		{ "bush_blue",     9,   8,  62,  51, false,   0,  0 },
+		{ "bush_red",      9,  68,  62,  51, false,   0,  0 },
+		{ "bush_leaf",    17, 249,  45,  41, false,   0,  0 },
+		{ "rock_big",    576, 224,  39,  26, true,    0,  0 },
+		{ "rock_small",   62, 226,  32,  23, false,    0,  0 },
+		{ "stump",       289, 152,  40,  28, true,    0,  0 },
+		{ "sign",        380, 139,  26,  32, false,   0,  0 },
+		{ "chest",       213, 239,  37,  32, true,    0,  0 },
+		{ "bench",       266, 235,  49,  39, false,   0,  0 },
+		{ "logs",        418, 232,  36,  49, true,    0,  0 },
+		{ "tall_grass",  158, 226,  31,  46, false,   0,  0 }
 	};
 
 	struct Prop {
@@ -178,6 +183,14 @@ public:
 
 	void Draw(GamesEngineeringBase::Window& canvas) override
 	{
+		DrawTerrain(canvas);
+		DrawProps(canvas, -1.0e9f, 1.0e9f);
+	}
+
+	// Terrain only, used together with DrawProps so actors can be sorted into
+	// the prop list by their base line
+	void DrawTerrain(GamesEngineeringBase::Window& canvas)
+	{
 		if (!infinite_ && (width_ <= 0 || height_ <= 0))
 		{
 			return;
@@ -205,13 +218,33 @@ public:
 		if (infinite_)
 		{
 			DrawScatteredProps(canvas, firstX, firstY, cols, rows, camX, camY);
+		}
+	}
+
+	// Draws the props whose base line is in [minBaseY, maxBaseY). Call it twice
+	// around the actors to get correct "walk behind the house" occlusion.
+	void DrawProps(GamesEngineeringBase::Window& canvas, float minBaseY, float maxBaseY)
+	{
+		if (infinite_ || propCount_ <= 0)
+		{
 			return;
 		}
 
-		// Props are sorted by their base line so lower objects are drawn in front
+		const int camX = static_cast<int>(camera_.x_);
+		const int camY = static_cast<int>(camera_.y_);
+
+		const int viewW = static_cast<int>(canvas.getWidth());
+		const int viewH = static_cast<int>(canvas.getHeight());
+
 		for (int i = 0; i < propCount_; ++i)
 		{
 			const Prop& p = props_[i];
+			const float base = static_cast<float>(p.baseY);
+
+			if (base < minBaseY || base >= maxBaseY)
+			{
+				continue;
+			}
 
 			if (p.x + kSprites[p.kind].w < camX || p.x > camX + viewW)
 			{
@@ -224,6 +257,42 @@ public:
 
 			DrawProp(canvas, p, p.x - camX, p.y - camY);
 		}
+	}
+
+	// -----------------------------------------------------------------------
+	// Prop access for the shared depth sorted draw list in main
+
+	int PropCount() const { return propCount_; }
+
+	int PropBaseY(int index) const
+	{
+		return (index >= 0 && index < propCount_) ? props_[index].baseY : 0;
+	}
+
+	void DrawPropAt(GamesEngineeringBase::Window& canvas, int index)
+	{
+		if (index < 0 || index >= propCount_)
+		{
+			return;
+		}
+
+		const Prop& p = props_[index];
+
+		const int camX = static_cast<int>(camera_.x_);
+		const int camY = static_cast<int>(camera_.y_);
+		const int viewW = static_cast<int>(canvas.getWidth());
+		const int viewH = static_cast<int>(canvas.getHeight());
+
+		if (p.x + kSprites[p.kind].w < camX || p.x > camX + viewW)
+		{
+			return;
+		}
+		if (p.y + kSprites[p.kind].h < camY || p.y > camY + viewH)
+		{
+			return;
+		}
+
+		DrawProp(canvas, p, p.x - camX, p.y - camY);
 	}
 
 	// -----------------------------------------------------------------------
@@ -514,15 +583,17 @@ private:
 			return;
 		}
 
-		const int tx0 = p.x / kTile;
-		const int tx1 = (p.x + s.w - 1) / kTile;
-		const int ty0 = p.y / kTile;
-		const int ty1 = (p.y + s.h - 1) / kTile;
-
 		if (kind <= 3)
 		{
-			// Houses block their whole footprint
-			Block(tx0, ty0, tx1, ty1);
+			// Houses: only the wall base is solid, the roof can be walked behind
+			const int solidW = s.solidW > 0 ? s.solidW : s.w;
+			const int solidH = s.solidH > 0 ? s.solidH : s.h;
+
+			const int solidLeft = p.x + (s.w - solidW) / 2;
+			const int solidTop = p.baseY - solidH;
+
+			Block(solidLeft / kTile, solidTop / kTile,
+				  (solidLeft + solidW - 1) / kTile, (p.baseY - 1) / kTile);
 		}
 		else
 		{
