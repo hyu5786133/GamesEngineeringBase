@@ -1,6 +1,7 @@
 #pragma once
 
 #include "GamesEngineeringBase.h"
+#include <cstddef>
 
 // ---------------------------------------------------------------------------
 // Low level blitting helpers used by the tile map.
@@ -8,8 +9,32 @@
 // The framework only offers full-image drawing (Renderer_draw_image), so a tile
 // map needs to copy 32x32 regions out of a tileset. These helpers do that and
 // honour the source alpha channel, which is what makes transparent tiles and
-// sprites work.
+// sprites work. Partial alpha is blended with whatever is already in the back
+// buffer (the UI uses faded sprites, e.g. empty hearts).
 // ---------------------------------------------------------------------------
+
+inline void Renderer_blend_pixel(GamesEngineeringBase::Window& canvas,
+	int x, int y, const unsigned char* pixel, int alpha)
+{
+	if (alpha <= 0)
+	{
+		return;
+	}
+
+	if (alpha >= 255)
+	{
+		canvas.draw(x, y, const_cast<unsigned char*>(pixel));
+		return;
+	}
+
+	unsigned char* destination = canvas.backBuffer()
+		+ (static_cast<size_t>(y) * canvas.getWidth() + static_cast<size_t>(x)) * 3;
+
+	const int inverse = 255 - alpha;
+	destination[0] = static_cast<unsigned char>((pixel[0] * alpha + destination[0] * inverse) / 255);
+	destination[1] = static_cast<unsigned char>((pixel[1] * alpha + destination[1] * inverse) / 255);
+	destination[2] = static_cast<unsigned char>((pixel[2] * alpha + destination[2] * inverse) / 255);
+}
 
 inline void Renderer_blit(GamesEngineeringBase::Window& canvas,
 	const GamesEngineeringBase::Image& image,
@@ -60,7 +85,8 @@ inline void Renderer_blit(GamesEngineeringBase::Window& canvas,
 				continue;
 			}
 
-			canvas.draw(dstX + x, dstY + y, const_cast<unsigned char*>(p));
+			Renderer_blend_pixel(canvas, dstX + x, dstY + y, p,
+				channels == 4 ? p[3] : 255);
 		}
 	}
 }
@@ -150,7 +176,8 @@ inline void Renderer_blit_scaled(GamesEngineeringBase::Window& canvas,
 
 					if (px >= 0 && px < winW)
 					{
-						canvas.draw(px, py, const_cast<unsigned char*>(p));
+						Renderer_blend_pixel(canvas, px, py, p,
+							channels == 4 ? p[3] : 255);
 					}
 				}
 			}

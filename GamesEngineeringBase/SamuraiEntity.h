@@ -89,8 +89,45 @@ public:
 	}
 
 	void Die() { SetState(kDeath); }
-	void Respawn() { SetState(kIdle); }
+
+	void Respawn()
+	{
+		hp_ = maxHp_;
+		invulnerable_ = 0.0f;
+		SetState(kIdle);
+	}
+
 	bool IsDead() const { return state_ == kDeath; }
+
+	// -----------------------------------------------------------------------
+
+	int Hp() const { return hp_; }
+	int MaxHp() const { return maxHp_; }
+	bool IsInvulnerable() const { return invulnerable_ > 0.0f; }
+
+	// Returns true when the damage was actually applied
+	bool TakeDamage(int amount)
+	{
+		if (state_ == kDeath || invulnerable_ > 0.0f)
+		{
+			return false;
+		}
+
+		hp_ -= amount;
+		invulnerable_ = 1.2f;
+
+		if (hp_ <= 0)
+		{
+			hp_ = 0;
+			Die();
+		}
+		else
+		{
+			Hurt();
+		}
+
+		return true;
+	}
 
 	// Collision box in world pixels
 	void BodyBox(float& left, float& top, float& right, float& bottom) const
@@ -148,6 +185,11 @@ public:
 
 	void Update(float delta_time) override
 	{
+		if (invulnerable_ > 0.0f)
+		{
+			invulnerable_ -= delta_time;
+		}
+
 		if (state_ == kDeath)
 		{
 			AdvanceFrame(delta_time);
@@ -266,6 +308,10 @@ private:
 
 	float walkSpeed_ = 96.0f;	// pixels per second
 	float runSpeed_ = 180.0f;
+
+	int maxHp_ = 6;
+	int hp_ = 6;
+	float invulnerable_ = 0.0f;
 
 	Vec2f inputAxis_{ 0.0f, 0.0f };
 	bool running_ = false;

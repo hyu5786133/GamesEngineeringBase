@@ -9,15 +9,27 @@
 
 #include "Entity.h" // Include the Entity header
 #include "SamuraiEntity.h" // Include the player character
-#include "TrainingDummy.h" // Include the temporary attack target
+#include "NinjaEntity.h" // Include the melee enemies
 #include "TileMapEntity.h" // Include the tile map (background system)
 #include "Font5x7.h" // Include the bitmap font used for the FPS counter
+#include "Hud.h" // Include the heart health display
 
 // -----------------------------------------------------------
 
 #include <filesystem>
 #include <windows.h>
 #include <algorithm>
+
+// -----------------------------------------------------------
+
+static const int kNinjaCount = 3;
+
+// Village spawn points for the enemies
+static const Vec2f kNinjaSpawn[kNinjaCount] = {
+	{ 540.0f, 470.0f },
+	{ 330.0f, 550.0f },
+	{ 980.0f, 520.0f }
+};
 
 // -----------------------------------------------------------
 
@@ -35,9 +47,15 @@ static void PlaceHeroOnSpawn(SamuraiEntity& hero, const TileMapEntity& world)
 	hero.Respawn();
 }
 
-// -----------------------------------------------------------
+static void ResetNinjas(NinjaEntity ninjas[kNinjaCount])
+{
+	for (int i = 0; i < kNinjaCount; ++i)
+	{
+		ninjas[i].Reset(kNinjaSpawn[i]);
+	}
+}
 
-// Draws a world space rectangle as a 1px outline (debug view of the body box)
+// Draws a world space rectangle as a 1px outline (debug view of a hit box)
 static void DrawWorldBox(GamesEngineeringBase::Window& canvas,
 	float left, float top, float right, float bottom,
 	unsigned char r, unsigned char g, unsigned char b)
@@ -90,12 +108,24 @@ int main() {
 		return 1;
 	}
 
+	// UI sheet used for the heart health display
+	GamesEngineeringBase::Image uiSheet;
+
+	if (!uiSheet.load("..\\Resources\\MediavelFull.png"))
+	{
+		std::cerr << "Failed to load MediavelFull.png" << std::endl;
+	}
+
 	SamuraiEntity hero({ 0.0f, 0.0f });
 	PlaceHeroOnSpawn(hero, world);
 
-	// Temporary targets used to test the melee hit detection
-	TrainingDummy dummyA({ 784.0f, 544.0f }, 3);
-	TrainingDummy dummyB({ 368.0f, 544.0f }, 3);
+	// Three yellow ninjas, each with 3 hit points
+	NinjaEntity ninjas[kNinjaCount];
+
+	for (int i = 0; i < kNinjaCount; ++i)
+	{
+		ninjas[i].Init("..\\Resources\\YellowNinja", "yellowNinja", 3, kNinjaSpawn[i]);
+	}
 
 	float delta_time = timer.dt(); // Get the elapsed time since the last frame.
 
@@ -106,6 +136,8 @@ int main() {
 	int fpsFrames = 0;
 	int fpsValue = 0;
 	float msValue = 0.0f;
+
+	int frameCounter = 0;
 
 	// Edge detection for the one shot keys
 	bool keyOneDown = false;
@@ -118,6 +150,7 @@ int main() {
 	while (running)
 	{
 		delta_time = timer.dt();
+		++frameCounter;
 
 		if (canvas.keyPressed(VK_ESCAPE)) break;
 
@@ -130,6 +163,7 @@ int main() {
 			if (world.LoadMap("..\\Resources\\village.map"))
 			{
 				PlaceHeroOnSpawn(hero, world);
+				ResetNinjas(ninjas);
 				std::cerr << "Loaded village.map\n";
 			}
 		}
@@ -143,17 +177,21 @@ int main() {
 		keyOneDown = keyOne;
 		keyTwoDown = keyTwo;
 
-		// Actions: J attack, H hurt, K die, R respawn (debug triggers until
-		// enemies and health exist)
+		// Actions: J attack, R respawn (H/K are still handy debug triggers)
 		const bool attackKey = canvas.keyPressed('J');
 		const bool hurtKey = canvas.keyPressed('H');
 		const bool deathKey = canvas.keyPressed('K');
 		const bool respawnKey = canvas.keyPressed('R');
 
 		if (attackKey && !attackDown) { hero.Attack(); }
-		if (hurtKey && !hurtDown) { hero.Hurt(); }
+		if (hurtKey && !hurtDown) { hero.TakeDamage(1); }
 		if (deathKey && !deathDown) { hero.Die(); }
-		if (respawnKey && !respawnDown) { PlaceHeroOnSpawn(hero, world); }
+
+		if (respawnKey && !respawnDown)
+		{
+			PlaceHeroOnSpawn(hero, world);
+			ResetNinjas(ninjas);
+		}
 
 		attackDown = attackKey;
 		hurtDown = hurtKey;
@@ -199,6 +237,33 @@ int main() {
 							   std::clamp(hero.GetPosition().y_, minY, maxY) });
 		}
 
+		// Enemies: chase the player, then damage on contact
+		if (!world.IsInfinite())
+		{
+			float heroLeft = 0.0f, heroTop = 0.0f, heroRight = 0.0f, heroBottom = 0.0f;
+			hero.BodyBox(heroLeft, heroTop, heroRight, heroBottom);
+
+			for (int i = 0; i < kNinjaCount; ++i)
+			{
+				ninjas[i].Step(delta_time, hero.GetPosition(), world);
+
+				if (ninjas[i].IsDead() || hero.IsDead())
+				{
+					continue;
+				}
+
+				float nl = 0.0f, nt = 0.0f, nr = 0.0f, nb = 0.0f;
+				ninjas[i].BodyBox(nl, nt, nr, nb);
+
+				const bool overlap = !(nr < heroLeft || nl > heroRight || nb < heroTop || nt > heroBottom);
+
+				if (overlap && ninjas[i].TryContactDamage())
+				{
+					hero.TakeDamage(1);
+				}
+			}
+		}
+
 		// Melee hit detection: while the blade is out, damage anything the hit
 		// box overlaps. Each swing can hit a target only once.
 		bool attack_active = false;
@@ -211,13 +276,12 @@ int main() {
 
 			if (!world.IsInfinite())
 			{
-				dummyA.TryHit(hero.SwingId(), attackLeft, attackTop, attackRight, attackBottom);
-				dummyB.TryHit(hero.SwingId(), attackLeft, attackTop, attackRight, attackBottom);
+				for (int i = 0; i < kNinjaCount; ++i)
+				{
+					ninjas[i].TryHit(hero.SwingId(), attackLeft, attackTop, attackRight, attackBottom);
+				}
 			}
 		}
-
-		dummyA.Update(delta_time);
-		dummyB.Update(delta_time);
 
 		// Camera follows the middle of the hero body
 		world.FollowCamera(hero.BodyCentre(), canvas);
@@ -227,11 +291,17 @@ int main() {
 
 		if (!world.IsInfinite())
 		{
-			dummyA.Draw(canvas);
-			dummyB.Draw(canvas);
+			for (int i = 0; i < kNinjaCount; ++i)
+			{
+				ninjas[i].Draw(canvas);
+			}
 		}
 
-		hero.Draw(canvas);
+		// Blink the hero while he is invulnerable after a hit
+		if (!hero.IsInvulnerable() || ((frameCounter / 4) % 2) == 0)
+		{
+			hero.Draw(canvas);
+		}
 
 		// Hold B to see the collision box, V to see the sword hit box
 		if (canvas.keyPressed('B'))
@@ -244,6 +314,9 @@ int main() {
 		{
 			DrawWorldBox(canvas, attackLeft, attackTop, attackRight, attackBottom, 255, 255, 0);
 		}
+
+		// HUD: hearts under the frame counter
+		DrawHearts(canvas, uiSheet, 8, 30, hero.Hp(), hero.MaxHp(), 2);
 
 		// FPS overlay: black shadow first so it stays readable on any terrain
 		fpsAccum += delta_time;

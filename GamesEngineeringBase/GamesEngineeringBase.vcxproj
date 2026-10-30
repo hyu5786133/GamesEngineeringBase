@@ -147,7 +147,9 @@
     <ClInclude Include="Font5x7.h" />
     <ClInclude Include="GameEntity.h" />
     <ClInclude Include="GamesEngineeringBase.h" />
+    <ClInclude Include="Hud.h" />
     <ClInclude Include="MapFile.h" />
+    <ClInclude Include="NinjaEntity.h" />
     <ClInclude Include="Raid.h" />
     <ClInclude Include="renderer.h" />
     <ClInclude Include="SamuraiEntity.h" />
