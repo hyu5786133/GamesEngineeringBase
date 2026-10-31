@@ -56,6 +56,9 @@
     <ClInclude Include="SamuraiEntity.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="SpawnerEntity.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="shapes.h">
       <Filter>Header Files</Filter>
     </ClInclude>

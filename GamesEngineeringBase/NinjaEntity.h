@@ -9,18 +9,72 @@
 #include <string>
 
 // ---------------------------------------------------------------------------
-// Melee enemy (yellow ninja and blue ninja).
+// Enemy types and entity.
 //
-// Same idea as the samurai: 128x128 frames, character anchored on its feet point
-// (60, 96 inside a frame), lower body collision box. Behaviour is a simple chase:
-// walk straight at the player when inside the aggro radius, stop at contact range
-// and swing; contact with the player deals damage on a cooldown.
-// 
-// Ranged enemy (green ninja).
-// 
-// The variant that draws a bow and shoots arrows at the player. Chasing behaviour
-// is similar to the melee types, but stop and shoot once the player is within 
-// the shooting range. The arrow is a separate entity, see ArrowEntity.h.
+// NinjaProfile holds one loaded set of animations plus the tuning values for a
+// type (yellow / blue / green). It is loaded once per type at start up and
+// shared by every enemy of that type, so spawners can hand out enemies without
+// reloading textures.
+//
+// NinjaEntity is one instance: 128x128 frames, anchored on its feet point
+// (60, 96), lower body collision box. Yellow and blue chase and swing; green
+// keeps its distance and shoots arrows (see ArrowEntity.h).
+// ---------------------------------------------------------------------------
+
+struct NinjaProfile
+{
+	GamesEngineeringBase::Image sheets[5];	// idle, walk, attack, hurt, death
+	int frames[5] = { 1, 1, 1, 1, 1 };
+
+	int attackActiveFrom = 0;
+	int attackActiveTo = 0;
+	int releaseFrame = 0;
+
+	bool ranged = false;
+	int hp = 3;
+	float speed = 70.0f;
+	float aggro = 420.0f;
+
+	void Load(const std::string& folder, const std::string& prefix,
+		int hitPoints, float moveSpeed, float aggroRadius, bool rangedType)
+	{
+		hp = hitPoints;
+		speed = moveSpeed;
+		aggro = aggroRadius;
+		ranged = rangedType;
+
+		const std::string base = folder + "\\" + prefix;
+
+		LoadImage(sheets[0], base + " - idle.png");
+		LoadImage(sheets[1], base + " - walk.png");
+		LoadImage(sheets[2], base + " - attack.png");
+		LoadImage(sheets[3], base + " - Whitehit.png");
+		LoadImage(sheets[4], base + " - Death.png");
+
+		for (int i = 0; i < 5; ++i)
+		{
+			frames[i] = (sheets[i].width > 0)
+				? static_cast<int>(sheets[i].width) / 128
+				: 1;
+		}
+
+		const int attackFrames = frames[2];
+		attackActiveFrom = attackFrames * 3 / 10;
+		attackActiveTo = attackFrames * 6 / 10;
+		releaseFrame = attackFrames * 55 / 100;
+	}
+
+private:
+
+	static void LoadImage(GamesEngineeringBase::Image& image, const std::string& filename)
+	{
+		if (!image.load(filename))
+		{
+			std::cerr << "[NinjaProfile] Failed to load: " << filename << std::endl;
+		}
+	}
+};
+
 // ---------------------------------------------------------------------------
 
 class NinjaEntity : public VisualEntity {
@@ -38,17 +92,12 @@ public:
 	static constexpr int kBodyW = 20;
 	static constexpr int kBodyH = 18;
 
-	static constexpr float kAggroRange = 420.0f;
-	// Must be smaller than the combined half widths of the two body boxes,
-	// otherwise the ninja stops just outside contact range and never hits
 	static constexpr float kStopDistance = 32.0f;
 	static constexpr float kAttackRange = 46.0f;
 	static constexpr float kAttackCooldown = 1.6f;
 	static constexpr float kRangedCooldown = 1.9f;
 	static constexpr float kShootRange = 320.0f;
 
-	// Frame counts differ per ninja type, so they are read from the loaded
-	// sheets; only playback speed and looping live here.
 	struct AnimDef {
 		float fps;
 		bool loop;
@@ -67,15 +116,20 @@ public:
 	{
 	}
 
-	void Init(const std::string& folder, const std::string& prefix, int hp,
-		float speed, float aggroRange, bool ranged, const Vec2f& feet)
+	void Init(const NinjaProfile* profile, const Vec2f& feet)
+	{
+		profile_ = profile;
+		active_ = true;
+		Reset(feet);
+	}
+
+	// Revives the instance at a new position (used by the spawners)
+	void Reset(const Vec2f& feet)
 	{
 		SetPosition(feet);
-		hp_ = hp;
-		maxHp_ = hp;
-		speed_ = speed;
-		aggroRange_ = aggroRange;
-		ranged_ = ranged;
+		hp_ = profile_ ? profile_->hp : 1;
+		maxHp_ = hp_;
+		aggroRange_ = profile_ ? profile_->aggro : 420.0f;
 		lastSwing_ = -1;
 		hitThisSwing_ = false;
 		shotPending_ = false;
@@ -84,43 +138,10 @@ public:
 		state_ = kIdle;
 		frame_ = 0;
 		animTime_ = 0.0f;
-
-		const std::string base = folder + "\\" + prefix;
-
-		Load(sheets_[kAnimIdle], base + " - idle.png");
-		Load(sheets_[kAnimWalk], base + " - walk.png");
-		Load(sheets_[kAnimAttack], base + " - attack.png");
-		Load(sheets_[kAnimHurt], base + " - Whitehit.png");
-		Load(sheets_[kAnimDeath], base + " - Death.png");
-
-		// Derive the frame counts from the sheet widths
-		for (int i = 0; i < kAnimCount; ++i)
-		{
-			frames_[i] = (sheets_[i].width > 0)
-				? static_cast<int>(sheets_[i].width) / kFrame
-				: 1;
-		}
-
-		// The blade is out in the middle of the attack animation
-		const int attackFrames = frames_[kAnimAttack];
-		attackActiveFrom_ = attackFrames * 3 / 10;
-		attackActiveTo_ = attackFrames * 6 / 10;
-
-		// Ranged types release the arrow a bit later, around the apex of the draw
-		releaseFrame_ = attackFrames * 55 / 100;
 	}
 
-	void Reset(const Vec2f& feet)
-	{
-		SetPosition(feet);
-		hp_ = maxHp_;
-		lastSwing_ = -1;
-		hitThisSwing_ = false;
-		shotPending_ = false;
-		shotFired_ = false;
-		cooldown_ = 0.0f;
-		SetState(kIdle);
-	}
+	void Deactivate() { active_ = false; }
+	bool IsActive() const { return active_; }
 
 	// -----------------------------------------------------------------------
 
@@ -132,6 +153,11 @@ public:
 	// AI step: needs the player position and the map for collision
 	void Step(float delta_time, const Vec2f& target, const TileMapEntity& world)
 	{
+		if (!active_ || profile_ == nullptr)
+		{
+			return;
+		}
+
 		AdvanceFrame(delta_time);
 
 		if (cooldown_ > 0.0f)
@@ -147,7 +173,7 @@ public:
 		if (state_ == kAttack)
 		{
 			// Ranged types release the arrow part way through the draw
-			if (ranged_ && !shotFired_ && frame_ >= releaseFrame_)
+			if (profile_->ranged && !shotFired_ && frame_ >= profile_->releaseFrame)
 			{
 				shotFired_ = true;
 				shotPending_ = true;
@@ -189,11 +215,11 @@ public:
 			facing_ = -1;
 		}
 
-		if (ranged_)
+		if (profile_->ranged)
 		{
 			// Stop and shoot once the player is inside the shooting range,
 			// otherwise keep closing the distance
-			if (distance <= shootRange_)
+			if (distance <= kShootRange)
 			{
 				if (cooldown_ <= 0.0f)
 				{
@@ -235,7 +261,7 @@ public:
 		const Vec2f direction{ dx * inverse, dy * inverse };
 
 		const Vec2f previous = GetPosition();
-		Move(direction * (speed_ * delta_time));
+		Move(direction * (profile_->speed * delta_time));
 
 		float left = 0.0f, top = 0.0f, right = 0.0f, bottom = 0.0f;
 		BodyBox(left, top, right, bottom);
@@ -261,7 +287,7 @@ public:
 	{
 		hitThisSwing_ = false;
 		shotFired_ = false;
-		cooldown_ = ranged_ ? kRangedCooldown : kAttackCooldown;
+		cooldown_ = (profile_ && profile_->ranged) ? kRangedCooldown : kAttackCooldown;
 		SetState(kAttack);
 	}
 
@@ -277,11 +303,13 @@ public:
 		return true;
 	}
 
-	// True during the frames where the blade is out, the sword hit box is only
-	// valid then
+	// True during the frames where the blade is out
 	bool IsAttackActive() const
 	{
-		return state_ == kAttack && frame_ >= attackActiveFrom_ && frame_ <= attackActiveTo_;
+		return active_ && profile_ != nullptr
+			&& state_ == kAttack
+			&& frame_ >= profile_->attackActiveFrom
+			&& frame_ <= profile_->attackActiveTo;
 	}
 
 	void AttackBox(float& left, float& top, float& right, float& bottom) const
@@ -325,7 +353,7 @@ public:
 	// Applies one sword hit if the boxes overlap and this swing has not hit yet
 	bool TryHit(int swingId, float left, float top, float right, float bottom)
 	{
-		if (state_ == kDeath || swingId == lastSwing_)
+		if (!active_ || state_ == kDeath || swingId == lastSwing_)
 		{
 			return false;
 		}
@@ -367,19 +395,27 @@ public:
 	}
 
 	bool IsDead() const { return state_ == kDeath; }
-	bool IsRanged() const { return ranged_; }
+	bool IsRanged() const { return profile_ != nullptr && profile_->ranged; }
+
+	// Endless mode enemies hunt the player even when they spawn off screen
+	void SetAggroRange(float range) { aggroRange_ = range; }
 
 	// True once the death animation has played out, the entity can be removed
 	bool ShouldDespawn() const { return state_ == kDeath && AnimFinished(); }
 
 	void Draw(GamesEngineeringBase::Window& window) override
 	{
+		if (!active_ || profile_ == nullptr)
+		{
+			return;
+		}
+
 		if (state_ == kDeath && AnimFinished())
 		{
 			return;
 		}
 
-		const GamesEngineeringBase::Image& sheet = sheets_[CurrentAnim()];
+		const GamesEngineeringBase::Image& sheet = profile_->sheets[CurrentAnim()];
 
 		if (sheet.data != nullptr)
 		{
@@ -399,10 +435,15 @@ public:
 
 private:
 
+	int CurrentFrames() const
+	{
+		return profile_ ? profile_->frames[CurrentAnim()] : 1;
+	}
+
 	bool AnimFinished() const
 	{
 		const AnimDef& def = kAnims[CurrentAnim()];
-		return animTime_ * def.fps >= static_cast<float>(frames_[CurrentAnim()]);
+		return animTime_ * def.fps >= static_cast<float>(CurrentFrames());
 	}
 
 	void SetState(State state)
@@ -423,14 +464,15 @@ private:
 
 		const AnimDef& def = kAnims[CurrentAnim()];
 		const int frame = static_cast<int>(animTime_ * def.fps);
+		const int frames = CurrentFrames();
 
 		if (def.loop)
 		{
-			frame_ = frame % frames_[CurrentAnim()];
+			frame_ = frame % frames;
 		}
 		else
 		{
-			frame_ = std::min(frame, frames_[CurrentAnim()] - 1);
+			frame_ = std::min(frame, frames - 1);
 		}
 	}
 
@@ -439,7 +481,7 @@ private:
 	void DrawHealthPips(GamesEngineeringBase::Window& window)
 	{
 		const int pipY = static_cast<int>(GetPosition().y_ - 78.0f - game::camera.y_);
-		const int pipX = static_cast<int>(GetPosition().x_ - 10.0f - game::camera.x_);
+		const int pipX = static_cast<int>(GetPosition().x_ - maxHp_ * 3.5f - game::camera.x_);
 
 		for (int i = 0; i < maxHp_; ++i)
 		{
@@ -470,35 +512,20 @@ private:
 		}
 	}
 
-	static void Load(GamesEngineeringBase::Image& image, const std::string& filename)
-	{
-		if (!image.load(filename))
-		{
-			std::cerr << "[NinjaEntity] Failed to load: " << filename << std::endl;
-		}
-	}
-
 	// -----------------------------------------------------------------------
 
-	GamesEngineeringBase::Image sheets_[kAnimCount];
-	int frames_[kAnimCount] = { 1, 1, 1, 1, 1 };
+	const NinjaProfile* profile_ = nullptr;
+	bool active_ = false;
 
 	State state_ = kIdle;
 	int frame_ = 0;
 	int facing_ = 1;
 	float animTime_ = 0.0f;
 	float cooldown_ = 0.0f;
-	float speed_ = 70.0f;
 	float aggroRange_ = 420.0f;
 
-	bool ranged_ = false;
-	float shootRange_ = kShootRange;
-	int releaseFrame_ = 0;
 	bool shotPending_ = false;
 	bool shotFired_ = false;
-
-	int attackActiveFrom_ = 0;
-	int attackActiveTo_ = 0;
 
 	int hp_ = 3;
 	int maxHp_ = 3;
