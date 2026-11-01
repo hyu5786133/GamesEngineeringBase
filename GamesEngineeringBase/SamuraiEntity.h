@@ -100,6 +100,15 @@ public:
 	// -----------------------------------------------------------------------
 
 	int Hp() const override { return hp_; }
+
+	void SetHp(int hp) override
+	{
+		hp_ = hp < 1 ? 1 : (hp > maxHp_ ? maxHp_ : hp);
+		if (state_ == kDeath)
+		{
+			SetState(kIdle);
+		}
+	}
 	int MaxHp() const override { return maxHp_; }
 	bool IsInvulnerable() const override { return invulnerable_ > 0.0f; }
 

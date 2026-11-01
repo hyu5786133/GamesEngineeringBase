@@ -18,6 +18,7 @@
 #include "SpawnerEntity.h" // Include the destroyable objectives
 #include "TileMapEntity.h" // Include the tile map (background system)
 #include "Font5x7.h" // Include the bitmap font used for the HUD
+#include "SaveGame.h" // Include the save/load helpers
 #include "Hud.h" // Include the heart health display
 
 // -----------------------------------------------------------
@@ -32,6 +33,7 @@ static const int kMaxEnemies = 16;
 static const int kArrowCount = 8;
 static const float kArrowSpeed = 260.0f;
 static const float kPlayerArrowSpeed = 340.0f;
+static const char* kSavePath = "..\\Resources\\savegame.dat";
 static const float kNinjaGap = 40.0f;
 
 enum { kProfileYellow = 0, kProfileBlue, kProfileGreen, kProfileCount };
@@ -959,6 +961,56 @@ static void DrawRunStats(GamesEngineeringBase::Window& canvas, float seconds, in
 	DrawBitmapText(canvas, panelX + 11, panelY + 32, killText, 2, 255, 225, 150);
 }
 
+// Pause screen drawn over the frozen frame
+static void DrawPauseOverlay(GamesEngineeringBase::Window& canvas, const char* status)
+{
+	const int winW = static_cast<int>(canvas.getWidth());
+	const int winH = static_cast<int>(canvas.getHeight());
+
+	for (int y = 0; y < winH; ++y)
+	{
+		for (int x = 0; x < winW; ++x)
+		{
+			unsigned char* destination = canvas.backBuffer()
+				+ (static_cast<size_t>(y) * winW + x) * 3;
+
+			destination[0] = static_cast<unsigned char>(destination[0] * 110 / 255);
+			destination[1] = static_cast<unsigned char>(destination[1] * 110 / 255);
+			destination[2] = static_cast<unsigned char>(destination[2] * 110 / 255);
+		}
+	}
+
+	FillRect(canvas, 302, 170, 420, 300, 16, 18, 28);
+
+	for (int x = 302; x < 722; ++x)
+	{
+		canvas.draw(x, 170, 210, 170, 90);
+		canvas.draw(x, 171, 120, 96, 52);
+		canvas.draw(x, 468, 120, 96, 52);
+		canvas.draw(x, 469, 210, 170, 90);
+	}
+
+	for (int y = 170; y <= 469; ++y)
+	{
+		canvas.draw(302, y, 210, 170, 90);
+		canvas.draw(303, y, 120, 96, 52);
+		canvas.draw(720, y, 120, 96, 52);
+		canvas.draw(721, y, 210, 170, 90);
+	}
+
+	DrawTextCentered(canvas, 196, "PAUSED", 5, 255, 220, 120);
+
+	DrawTextCentered(canvas, 280, "P  OR  ESC    RESUME", 2, 235, 235, 235);
+	DrawTextCentered(canvas, 320, "F5    SAVE GAME", 2, 235, 235, 235);
+	DrawTextCentered(canvas, 360, "F9    LOAD GAME", 2, 235, 235, 235);
+	DrawTextCentered(canvas, 400, "Q     QUIT TO TITLE", 2, 200, 200, 200);
+
+	if (status != nullptr && status[0] != '\0')
+	{
+		DrawTextCentered(canvas, 436, status, 2, 160, 230, 160);
+	}
+}
+
 // -----------------------------------------------------------
 
 int main() {
@@ -1073,6 +1125,12 @@ int main() {
 	bool respawnDown = false;
 	bool enterDown = false;
 	bool navDown = false;
+	bool escapeDown = false;
+	bool pauseDown = false;
+	bool saveDown = false;
+	bool loadDown = false;
+	bool paused = false;
+	char saveMessage[32] = "";
 
 	while (running)
 	{
@@ -1083,6 +1141,8 @@ int main() {
 
 		const bool enterKey = canvas.keyPressed(VK_RETURN);
 		const bool escapeKey = canvas.keyPressed(VK_ESCAPE);
+		const bool escapePressed = escapeKey && !escapeDown;
+		escapeDown = escapeKey;
 
 		// ---------------------------------------------------------------
 		// Intro flow: title -> story -> hero select -> controls -> stage select
@@ -1090,47 +1150,84 @@ int main() {
 		{
 			const bool leftKey = canvas.keyPressed(VK_LEFT) || canvas.keyPressed('A');
 			const bool rightKey = canvas.keyPressed(VK_RIGHT) || canvas.keyPressed('D');
+			const bool navigate = !navDown && (leftKey || rightKey);
+			const int step = (leftKey && navigate) ? -1 : ((rightKey && navigate) ? 1 : 0);
+			const bool confirm = enterKey && !enterDown;
 
-			if (state == kTitle)
-			{
-				if (escapeKey) break;
-				if (enterKey && !enterDown) state = kIntro;
-			}
-			else if (state == kIntro)
-			{
-				if (escapeKey) state = kTitle;
-				if (enterKey && !enterDown) state = kCharSelect;
-			}
-			else if (state == kCharSelect)
-			{
-				if (escapeKey) state = kIntro;
+			// The screen drawn is the one the frame started on, so the frame
+			// that starts a run still shows the stage picker
+			const GameState screen = state;
 
-				if (leftKey && !navDown) charIndex = (charIndex + kCharacterCount - 1) % kCharacterCount;
-				if (rightKey && !navDown) charIndex = (charIndex + 1) % kCharacterCount;
+			switch (state)
+			{
+			case kTitle:
+				if (escapePressed)
+				{
+					running = false;
+				}
+				else if (confirm)
+				{
+					state = kIntro;
+				}
+				break;
 
-				if (enterKey && !enterDown && !kCharacters[charIndex].locked)
+			case kIntro:
+				if (escapePressed)
+				{
+					state = kTitle;
+				}
+				else if (confirm)
+				{
+					state = kCharSelect;
+				}
+				break;
+
+			case kCharSelect:
+				if (escapePressed)
+				{
+					state = kIntro;
+				}
+
+				if (step != 0)
+				{
+					charIndex = (charIndex + kCharacterCount + step) % kCharacterCount;
+				}
+
+				if (confirm && !kCharacters[charIndex].locked)
 				{
 					state = kControls;
 				}
-			}
-			else if (state == kControls)
-			{
-				if (escapeKey) state = kCharSelect;
-				if (enterKey && !enterDown) state = kLevelSelect;
-			}
-			else if (state == kLevelSelect)
-			{
-				if (escapeKey) state = kControls;
+				break;
 
-				if (leftKey && !navDown) levelIndex = (levelIndex + kLevelCount - 1) % kLevelCount;
-				if (rightKey && !navDown) levelIndex = (levelIndex + 1) % kLevelCount;
+			case kControls:
+				if (escapePressed)
+				{
+					state = kCharSelect;
+				}
+				else if (confirm)
+				{
+					state = kLevelSelect;
+				}
+				break;
 
-				if (enterKey && !enterDown)
+			case kLevelSelect:
+				if (escapePressed)
+				{
+					state = kControls;
+				}
+
+				if (step != 0)
+				{
+					levelIndex = (levelIndex + kLevelCount + step) % kLevelCount;
+				}
+
+				if (confirm)
 				{
 					selectedPlayer = (charIndex == 1) ? static_cast<PlayerCharacter*>(&archer)
 													  : static_cast<PlayerCharacter*>(&samurai);
 
 					StartLevel(world, *selectedPlayer, enemies, slotProfile, profiles, spawners, levelIndex);
+
 					playTime = 0.0f;
 					endlessTimer = 2.0f;
 					kills = 0;
@@ -1138,6 +1235,10 @@ int main() {
 					deathTimer = 0.0f;
 					state = kPlaying;
 				}
+				break;
+
+			default:
+				break;
 			}
 
 			navDown = leftKey || rightKey;
@@ -1145,25 +1246,30 @@ int main() {
 
 			const bool blink = (frameCounter / 25) % 2 == 0;
 
-			if (state == kTitle)
+			switch (screen)
 			{
+			case kTitle:
 				DrawTitleScreen(canvas, uiSheet, blink);
-			}
-			else if (state == kIntro)
-			{
+				break;
+
+			case kIntro:
 				DrawIntroScreen(canvas, uiSheet, blink);
-			}
-			else if (state == kCharSelect)
-			{
+				break;
+
+			case kCharSelect:
 				DrawCharSelectScreen(canvas, samuraiIdle, archerSheet, charIndex, blink);
-			}
-			else if (state == kControls)
-			{
+				break;
+
+			case kControls:
 				DrawControlsScreen(canvas, charIndex, blink);
-			}
-			else
-			{
+				break;
+
+			case kLevelSelect:
 				DrawLevelSelectScreen(canvas, levelIndex, blink);
+				break;
+
+			default:
+				break;
 			}
 
 			canvas.present();
@@ -1204,9 +1310,143 @@ int main() {
 
 		// ---------------------------------------------------------------
 		// Playing
-		if (escapeKey)
+		const bool pauseKey = canvas.keyPressed('P');
+		const bool pausePressed = pauseKey && !pauseDown;
+		pauseDown = pauseKey;
+
+		if (escapePressed || pausePressed)
 		{
-			state = kTitle;
+			paused = !paused;
+			saveMessage[0] = '\0';
+		}
+
+		if (paused)
+		{
+			const bool saveKey = canvas.keyPressed(VK_F5);
+			const bool loadKey = canvas.keyPressed(VK_F9);
+			const bool quitKey = canvas.keyPressed('Q');
+
+			if (quitKey)
+			{
+				paused = false;
+				state = kTitle;
+				continue;
+			}
+
+			if (saveKey && !saveDown)
+			{
+				SaveGameData data;
+
+				data.levelIndex = levelIndex;
+				data.charIndex = charIndex;
+				data.playerHp = hero.Hp();
+				data.playerX = hero.GetPosition().x_;
+				data.playerY = hero.GetPosition().y_;
+				data.playTime = playTime;
+				data.kills = kills;
+				data.spawnTick = spawnTick;
+				data.endlessTimer = endlessTimer;
+
+				data.spawnerCount = kSpawnerCount;
+
+				for (int i = 0; i < kSpawnerCount; ++i)
+				{
+					data.spawnerHp[i] = spawners[i].IsAlive() ? spawners[i].Hp() : 0;
+				}
+
+				data.enemyCount = 0;
+
+				for (int i = 0; i < kMaxEnemies; ++i)
+				{
+					if (!enemies[i].IsActive() || enemies[i].IsDead())
+					{
+						continue;
+					}
+
+					SaveEnemy& entry = data.enemies[data.enemyCount];
+					entry.profile = (slotProfile[i] == profiles[0]) ? 0
+						: ((slotProfile[i] == profiles[1]) ? 1 : 2);
+					entry.x = enemies[i].GetPosition().x_;
+					entry.y = enemies[i].GetPosition().y_;
+					entry.hp = enemies[i].Hp();
+					++data.enemyCount;
+				}
+
+				std::snprintf(saveMessage, sizeof(saveMessage), "%s",
+					SaveGameToFile(kSavePath, data) ? "GAME SAVED" : "SAVE FAILED");
+			}
+
+			saveDown = saveKey;
+
+			if (loadKey && !loadDown)
+			{
+				SaveGameData data;
+
+				if (LoadGameFromFile(kSavePath, data))
+				{
+					charIndex = data.charIndex;
+					levelIndex = data.levelIndex;
+					selectedPlayer = (charIndex == 1) ? static_cast<PlayerCharacter*>(&archer)
+													  : static_cast<PlayerCharacter*>(&samurai);
+
+					StartLevel(world, *selectedPlayer, enemies, slotProfile, profiles, spawners, levelIndex);
+
+					// The save file holds the exact enemy list, drop the ones the
+					// level just spawned so loading does not duplicate them
+					for (int i = 0; i < kMaxEnemies; ++i)
+					{
+						enemies[i].Deactivate();
+					}
+
+					selectedPlayer->SetPosition({ data.playerX, data.playerY });
+					selectedPlayer->SetHp(data.playerHp);
+
+					playTime = data.playTime;
+					kills = data.kills;
+					spawnTick = data.spawnTick;
+					endlessTimer = data.endlessTimer;
+					deathTimer = 0.0f;
+
+					for (int i = 0; i < kSpawnerCount; ++i)
+					{
+						spawners[i].SetHp(data.spawnerHp[i]);
+					}
+
+					for (int e = 0; e < data.enemyCount; ++e)
+					{
+						const NinjaProfile* type = profiles[data.enemies[e].profile];
+
+						for (int s = 0; s < kMaxEnemies; ++s)
+						{
+							if (slotProfile[s] == type && !enemies[s].IsActive())
+							{
+								enemies[s].Init(type, { data.enemies[e].x, data.enemies[e].y });
+								enemies[s].Restore({ data.enemies[e].x, data.enemies[e].y },
+									data.enemies[e].hp);
+								break;
+							}
+						}
+					}
+
+					std::snprintf(saveMessage, sizeof(saveMessage), "%s", "GAME LOADED");
+				}
+				else
+				{
+					std::snprintf(saveMessage, sizeof(saveMessage), "%s", "NO SAVE FOUND");
+				}
+			}
+
+			loadDown = loadKey;
+
+			world.FollowCamera(hero.BodyCentre(), canvas);
+			game::camera = world.Camera();
+
+			DrawStage(canvas, world, hero, enemies, arrows, spawners);
+			DrawHearts(canvas, uiSheet, 8, 30, hero.Hp(), hero.MaxHp(), 2);
+			DrawRunStats(canvas, playTime, kills);
+			DrawPauseOverlay(canvas, saveMessage);
+
+			canvas.present();
 			continue;
 		}
 

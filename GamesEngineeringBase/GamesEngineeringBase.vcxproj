@@ -156,6 +156,7 @@
     <ClInclude Include="Raid.h" />
     <ClInclude Include="renderer.h" />
     <ClInclude Include="SamuraiEntity.h" />
+    <ClInclude Include="SaveGame.h" />
     <ClInclude Include="shapes.h" />
     <ClInclude Include="SpawnerEntity.h" />
     <ClInclude Include="TileMapEntity.h" />

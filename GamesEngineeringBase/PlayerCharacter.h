@@ -45,6 +45,7 @@ public:
 	virtual void Respawn() = 0;
 
 	virtual int Hp() const = 0;
+	virtual void SetHp(int hp) = 0;
 	virtual int MaxHp() const = 0;
 	virtual bool IsDead() const = 0;
 	virtual bool IsInvulnerable() const = 0;

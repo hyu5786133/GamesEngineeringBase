@@ -140,6 +140,18 @@ public:
 		animTime_ = 0.0f;
 	}
 
+	// Restores a saved enemy: same type, position and remaining health
+	void Restore(const Vec2f& feet, int hp)
+	{
+		Reset(feet);
+		hp_ = hp;
+
+		if (hp_ <= 0)
+		{
+			hp_ = 1;
+		}
+	}
+
 	void Deactivate() { active_ = false; }
 	bool IsActive() const { return active_; }
 
@@ -425,6 +437,7 @@ public:
 		top = bottom - kBodyH * kScale;
 	}
 
+	int Hp() const { return hp_; }
 	bool IsDead() const { return state_ == kDeath; }
 	bool IsRanged() const { return profile_ != nullptr && profile_->ranged; }
 

@@ -15,6 +15,7 @@ class SpawnerEntity : public VisualEntity {
 public:
 
 	static constexpr int kScale = 2;
+	static constexpr int kSpawnerHpDefault = 10;
 	// Slow on purpose: the level is already busy with the initial enemies
 	static constexpr float kSpawnInterval = 9.0f;
 	static constexpr float kFirstSpawnDelay = 6.0f;
@@ -140,6 +141,14 @@ public:
 		right = GetPosition().x_ + halfWidth;
 		bottom = GetPosition().y_;
 		top = bottom - 40.0f;
+	}
+
+	// Restores health from a save file
+	void SetHp(int hp)
+	{
+		hp_ = hp;
+		maxHp_ = kSpawnerHpDefault;
+		alive_ = hp > 0;
 	}
 
 	bool IsAlive() const { return alive_; }
