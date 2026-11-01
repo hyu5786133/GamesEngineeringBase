@@ -46,28 +46,30 @@ inline void DrawHudBackdrop(GamesEngineeringBase::Window& canvas,
 	}
 }
 
+// hp and maxHp are counted in HALF hearts (2 = one heart), so partial damage
+// can show the half heart sprite at (935, 8)
 inline void DrawHearts(GamesEngineeringBase::Window& canvas,
 	const GamesEngineeringBase::Image& ui,
-	int x, int y, int hp, int maxHp, int scale)
+	int x, int y, int hpHalf, int maxHalf, int scale)
 {
 	const int heartWidth = 18;
 	const int heartHeight = 15;
 	const int fullX = 903;
-	const int fullY = 8;
+	const int halfX = 935;
 	const int emptyX = 967;
-	const int emptyY = 8;
+	const int srcY = 8;
 	const int step = (heartWidth + 2) * scale;
 
-	DrawHudBackdrop(canvas, x - 4, y - 3, maxHp * step + 4, heartHeight * scale + 6, 110);
+	const int hearts = maxHalf / 2;
 
-	for (int i = 0; i < maxHp; ++i)
+	DrawHudBackdrop(canvas, x - 4, y - 3, hearts * step + 4, heartHeight * scale + 6, 110);
+
+	for (int i = 0; i < hearts; ++i)
 	{
-		const bool full = i < hp;
+		const int value = hpHalf - i * 2;
+		const int srcX = (value >= 2) ? fullX : ((value == 1) ? halfX : emptyX);
 
-		Renderer_blit_scaled(canvas, ui,
-			full ? fullX : emptyX,
-			full ? fullY : emptyY,
-			heartWidth, heartHeight,
+		Renderer_blit_scaled(canvas, ui, srcX, srcY, heartWidth, heartHeight,
 			x + i * step, y, scale, false);
 	}
 }

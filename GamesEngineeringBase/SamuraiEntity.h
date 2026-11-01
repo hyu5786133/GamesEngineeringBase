@@ -2,6 +2,7 @@
 
 #include "GamesEngineeringBase.h"
 #include "Entity.h"
+#include "PlayerCharacter.h"
 #include "TileRenderer.h"
 #include "Camera.h"
 
@@ -18,7 +19,7 @@
 // States: idle, walk, run (the speed skill), attack, hurt, death.
 // ---------------------------------------------------------------------------
 
-class SamuraiEntity : public VisualEntity {
+class SamuraiEntity : public PlayerCharacter {
 public:
 
 	enum State { kIdle = 0, kWalk, kRun, kAttack, kHurt, kDeath };
@@ -26,16 +27,12 @@ public:
 
 	static constexpr int kFrameW = 96;
 	static constexpr int kFrameH = 96;
-	static constexpr int kScale = 2;
 
 	// Feet point inside a frame (bottom centre of the character)
 	static constexpr float kFeetX = 46.0f;
 	static constexpr float kFeetY = 81.0f;
 
-	// Collision / hurt box in unscaled pixels. Only the lower body (legs/hips)
-	// is used, so the head may overlap walls and doorways are easier to pass.
-	static constexpr int kBodyW = 20;
-	static constexpr int kBodyH = 18;
+	// Collision / hurt box is inherited from PlayerCharacter (kBodyW / kBodyH)
 
 	struct AnimDef {
 		const char* file;
@@ -55,7 +52,7 @@ public:
 
 	// position_ is the feet point in world coordinates
 	explicit SamuraiEntity(const Vec2f& feet)
-		: VisualEntity(feet)
+		: PlayerCharacter(feet)
 	{
 		for (int i = 0; i < kAnimCount; ++i)
 		{
@@ -68,10 +65,11 @@ public:
 
 	// -----------------------------------------------------------------------
 
-	void SetInputAxis(const Vec2f& axis) { inputAxis_ = axis; }
-	void SetRunning(bool running) { running_ = running; }
+	void SetInputAxis(const Vec2f& axis) override { inputAxis_ = axis; }
+	// Shift is the samurai skill: sprint
+	void SetSkillHeld(bool held) override { running_ = held; }
 
-	void Attack()
+	void Attack() override
 	{
 		if (state_ != kDeath && state_ != kHurt)
 		{
@@ -88,25 +86,25 @@ public:
 		}
 	}
 
-	void Die() { SetState(kDeath); }
+	void Die() override { SetState(kDeath); }
 
-	void Respawn()
+	void Respawn() override
 	{
 		hp_ = maxHp_;
 		invulnerable_ = 0.0f;
 		SetState(kIdle);
 	}
 
-	bool IsDead() const { return state_ == kDeath; }
+	bool IsDead() const override { return state_ == kDeath; }
 
 	// -----------------------------------------------------------------------
 
-	int Hp() const { return hp_; }
-	int MaxHp() const { return maxHp_; }
-	bool IsInvulnerable() const { return invulnerable_ > 0.0f; }
+	int Hp() const override { return hp_; }
+	int MaxHp() const override { return maxHp_; }
+	bool IsInvulnerable() const override { return invulnerable_ > 0.0f; }
 
 	// Returns true when the damage was actually applied
-	bool TakeDamage(int amount)
+	bool TakeDamage(int amount) override
 	{
 		if (state_ == kDeath || invulnerable_ > 0.0f)
 		{
@@ -130,7 +128,7 @@ public:
 	}
 
 	// Collision box in world pixels
-	void BodyBox(float& left, float& top, float& right, float& bottom) const
+	void BodyBox(float& left, float& top, float& right, float& bottom) const override
 	{
 		const float halfWidth = kBodyW * kScale * 0.5f;
 
@@ -147,7 +145,7 @@ public:
 
 	// Hit box of the sword swing. Only valid while IsAttackActive() is true,
 	// which is the last three frames of the attack animation.
-	void AttackBox(float& left, float& top, float& right, float& bottom) const
+	void AttackBox(float& left, float& top, float& right, float& bottom) const override
 	{
 		const float halfWidth = kBodyW * kScale * 0.5f;
 		const float reach = 26.0f * kScale;
@@ -173,13 +171,13 @@ public:
 		}
 	}
 
-	bool IsAttackActive() const
+	bool IsAttackActive() const override
 	{
 		// 7 frame attack: 0-3 wind up, 4-6 the blade is out
 		return state_ == kAttack && frame_ >= 4 && frame_ <= 6;
 	}
 
-	int SwingId() const { return swingId_; }
+	int SwingId() const override { return swingId_; }
 
 	// -----------------------------------------------------------------------
 
@@ -309,8 +307,8 @@ private:
 	float walkSpeed_ = 96.0f;	// pixels per second
 	float runSpeed_ = 180.0f;
 
-	int maxHp_ = 6;
-	int hp_ = 6;
+	int maxHp_ = 12;	// half hearts: 6 full hearts
+	int hp_ = 12;
 	float invulnerable_ = 0.0f;
 
 	Vec2f inputAxis_{ 0.0f, 0.0f };

@@ -27,12 +27,13 @@ public:
 		}
 	}
 
-	void Spawn(const Vec2f& center, const Vec2f& direction, float speed, int damage)
+	void Spawn(const Vec2f& center, const Vec2f& direction, float speed, int damage, bool fromPlayer = false)
 	{
 		active_ = true;
 		position_ = center;
 		velocity_ = { direction.x_ * speed, direction.y_ * speed };
 		damage_ = damage;
+		fromPlayer_ = fromPlayer;
 		life_ = 3.0f;
 		animTime_ = 0.0f;
 		frame_ = 0;
@@ -77,6 +78,7 @@ public:
 	bool IsActive() const { return active_; }
 	void Deactivate() { active_ = false; }
 	int Damage() const { return damage_; }
+	bool FromPlayer() const { return fromPlayer_; }
 	Vec2f Position() const { return position_; }
 
 	void HurtBox(float& left, float& top, float& right, float& bottom) const
@@ -97,4 +99,5 @@ private:
 	float animTime_ = 0.0f;
 	int frame_ = 0;
 	int damage_ = 1;
+	bool fromPlayer_ = false;
 };

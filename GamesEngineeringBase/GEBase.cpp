@@ -10,7 +10,9 @@
 // -----------------------------------------------------------
 
 #include "Entity.h" // Include the Entity header
-#include "SamuraiEntity.h" // Include the player character
+#include "PlayerCharacter.h" // Shared interface for the playable classes
+#include "SamuraiEntity.h" // Include the samurai
+#include "ArcherEntity.h" // Include the archer
 #include "NinjaEntity.h" // Include the enemy types
 #include "ArrowEntity.h" // Include the archer projectiles
 #include "SpawnerEntity.h" // Include the destroyable objectives
@@ -29,6 +31,7 @@
 static const int kMaxEnemies = 16;
 static const int kArrowCount = 8;
 static const float kArrowSpeed = 260.0f;
+static const float kPlayerArrowSpeed = 340.0f;
 static const float kNinjaGap = 40.0f;
 
 enum { kProfileYellow = 0, kProfileBlue, kProfileGreen, kProfileCount };
@@ -58,8 +61,8 @@ struct CharacterDef
 static const int kCharacterCount = 3;
 
 static const CharacterDef kCharacters[kCharacterCount] = {
-	{ "SAMURAI", "MELEE",      "RUN",  false },
-	{ "RANGED",  "ARCHER",     "LATER", true },
+	{ "SAMURAI", "MELEE",       "RUN",   false },
+	{ "ARCHER",  "RANGED",      "GUARD", false },
 	{ "MAGE",    "SPELLCASTER", "LATER", true }
 };
 
@@ -89,9 +92,9 @@ struct InitialEnemy
 static const int kInitialEnemyCount = 3;
 
 static const InitialEnemy kInitialEnemies[kInitialEnemyCount] = {
-	{ kProfileYellow,  620.0f,  690.0f },
-	{ kProfileYellow, 1120.0f,  620.0f },
-	{ kProfileBlue,    900.0f,  900.0f }
+	{ kProfileGreen,   330.0f,  660.0f },	// left: archer keeps its distance
+	{ kProfileYellow,  980.0f,  700.0f },	// right: close enough to pressure the player
+	{ kProfileBlue,    980.0f, 1010.0f }
 };
 
 // Three objectives: top left, bottom left and top right
@@ -121,7 +124,7 @@ struct DrawItem
 // -----------------------------------------------------------
 
 // Places the hero so its feet stand on the middle of the spawn tile
-static void PlaceHeroOnSpawn(SamuraiEntity& hero, const TileMapEntity& world)
+static void PlaceHeroOnSpawn(PlayerCharacter& hero, const TileMapEntity& world)
 {
 	int spawnX = 0;
 	int spawnY = 0;
@@ -283,7 +286,7 @@ static float EndlessSpawnInterval(float elapsed)
 	return std::max(3.0f, 6.0f - t * 0.015f);
 }
 
-static void ResetLevel(TileMapEntity& world, SamuraiEntity& hero,
+static void ResetLevel(TileMapEntity& world, PlayerCharacter& hero,
 	NinjaEntity enemies[kMaxEnemies], const NinjaProfile* slotProfile[kMaxEnemies],
 	const NinjaProfile* profiles[kProfileCount],
 	SpawnerEntity spawners[kSpawnerCount])
@@ -319,7 +322,7 @@ static void ResetLevel(TileMapEntity& world, SamuraiEntity& hero,
 }
 
 // Loads the chosen stage and resets everything for a fresh run
-static void StartLevel(TileMapEntity& world, SamuraiEntity& hero,
+static void StartLevel(TileMapEntity& world, PlayerCharacter& hero,
 	NinjaEntity enemies[kMaxEnemies], const NinjaProfile* slotProfile[kMaxEnemies],
 	const NinjaProfile* profiles[kProfileCount],
 	SpawnerEntity spawners[kSpawnerCount], int levelIndex)
@@ -420,7 +423,7 @@ static void DrawBlockedOverlay(const TileMapEntity& world, GamesEngineeringBase:
 
 // Terrain plus every actor, sorted by the line their feet stand on
 static void DrawStage(GamesEngineeringBase::Window& canvas, TileMapEntity& world,
-	SamuraiEntity& hero, NinjaEntity enemies[kMaxEnemies],
+	PlayerCharacter& hero, NinjaEntity enemies[kMaxEnemies],
 	ArrowEntity arrows[kArrowCount], SpawnerEntity spawners[kSpawnerCount])
 {
 	world.DrawTerrain(canvas);
@@ -643,8 +646,8 @@ static void DrawTitleScreen(GamesEngineeringBase::Window& canvas,
 {
 	DrawUIGradient(canvas);
 
-	DrawTextCentered(canvas, 130, "SAMURAI", 10, 255, 210, 90);
-	DrawTextCentered(canvas, 246, "THE VILLAGE", 4, 225, 225, 235);
+	DrawTextCentered(canvas, 130, "VILLAGEWATCH", 10, 255, 210, 90);
+	DrawTextCentered(canvas, 246, "THE NINJAFALL", 4, 225, 225, 235);
 
 	FillRect(canvas, 282, 316, 460, 3, 210, 170, 90);
 
@@ -682,15 +685,16 @@ static void DrawIntroScreen(GamesEngineeringBase::Window& canvas,
 	}
 
 	const char* lines[] = {
-		"THE VILLAGE HAS",
-		"FALLEN TO THE",
-		"EVIL NINJA CLAN.",
-		"YOU ARE THE ONLY HERO."
+		"THE VILLAGE HAS FALLEN",
+		"TO THE EVIL NINJA CLAN.",
+		"YOU ARE THE ONLY HERO.",
+		"DEFEAT THE NINJAS",
+		"AND SAVE THE VILLAGE!"
 	};
 
 	int y = 226;
 
-	for (int i = 0; i < 4; ++i)
+	for (int i = 0; i < 5; ++i)
 	{
 		DrawTextCentered(canvas, y, lines[i], 2, 74, 48, 28);
 		y += 28;
@@ -705,7 +709,8 @@ static void DrawIntroScreen(GamesEngineeringBase::Window& canvas,
 }
 
 static void DrawCharSelectScreen(GamesEngineeringBase::Window& canvas,
-	const GamesEngineeringBase::Image& portrait, int selected, bool blink)
+	const GamesEngineeringBase::Image& samuraiPortrait,
+	const GamesEngineeringBase::Image& archerPortrait, int selected, bool blink)
 {
 	DrawUIGradient(canvas);
 
@@ -729,21 +734,22 @@ static void DrawCharSelectScreen(GamesEngineeringBase::Window& canvas,
 		{
 			FillRect(canvas, x + 4, cardY + 4, cardW - 8, cardH - 8, 20, 18, 20);
 		}
-		else if (portrait.data != nullptr)
+		else
 		{
-			// The idle frame only has a small character inside it, so crop to it
-			const int srcX = 36;
-			const int srcY = 47;
-			const int srcW = 20;
-			const int srcH = 34;
-			const int portraitScale = 5;
-			const int portraitW = srcW * portraitScale;
-			const int portraitH = srcH * portraitScale;
+			// Both idle frames only hold a small character, so crop to it
+			const int srcX = (i == 0) ? 36 : 10;
+			const int srcY = (i == 0) ? 47 : 21;
+			const int srcW = (i == 0) ? 20 : 32;
+			const int srcH = (i == 0) ? 34 : 43;
+			const int portraitScale = (i == 0) ? 5 : 4;
 
-			Renderer_blit_scaled(canvas, portrait, srcX, srcY, srcW, srcH,
-				x + (cardW - portraitW) / 2, cardY + 24, portraitScale, false);
+			const GamesEngineeringBase::Image& portrait = (i == 0) ? samuraiPortrait : archerPortrait;
 
-			(void)portraitH;
+			if (portrait.data != nullptr)
+			{
+				Renderer_blit_scaled(canvas, portrait, srcX, srcY, srcW, srcH,
+					x + (cardW - srcW * portraitScale) / 2, cardY + 24, portraitScale, false);
+			}
 		}
 
 		const int nameY = cardY + 220;
@@ -777,11 +783,13 @@ static void DrawCharSelectScreen(GamesEngineeringBase::Window& canvas,
 	DrawTextCentered(canvas, 660, "ESC  BACK", 2, 150, 150, 160);
 }
 
-static void DrawControlsScreen(GamesEngineeringBase::Window& canvas, bool blink)
+static void DrawControlsScreen(GamesEngineeringBase::Window& canvas, int characterIndex, bool blink)
 {
 	DrawUIGradient(canvas);
 
-	DrawTextCentered(canvas, 60, "SAMURAI", 4, 255, 210, 90);
+	const bool archer = (characterIndex == 1);
+
+	DrawTextCentered(canvas, 60, kCharacters[characterIndex].name, 4, 255, 210, 90);
 	DrawTextCentered(canvas, 128, "CONTROLS", 2, 200, 200, 210);
 
 	struct Row
@@ -792,8 +800,8 @@ static void DrawControlsScreen(GamesEngineeringBase::Window& canvas, bool blink)
 
 	const Row rows[] = {
 		{ "WASD", "MOVE" },
-		{ "J", "ATTACK" },
-		{ "SHIFT", "RUN  (SKILL)" },
+		{ "J", archer ? "SHOOT" : "ATTACK" },
+		{ "SHIFT", archer ? "GUARD  (SKILL)" : "RUN  (SKILL)" },
 		{ "R", "RESTART LEVEL" },
 		{ "ESC", "BACK TO MENU" }
 	};
@@ -925,6 +933,32 @@ static void DrawResults(GamesEngineeringBase::Window& canvas, bool victory,
 	DrawTextCentered(canvas, 460, "PRESS ENTER FOR MENU", 2, 190, 190, 190);
 }
 
+// In-run HUD: elapsed time and kill count in the top right corner
+static void DrawRunStats(GamesEngineeringBase::Window& canvas, float seconds, int kills)
+{
+	const int panelW = 190;
+	const int panelH = 58;
+	const int panelX = static_cast<int>(canvas.getWidth()) - panelW - 8;
+	const int panelY = 8;
+
+	DrawHudBackdrop(canvas, panelX, panelY, panelW, panelH, 150);
+
+	const int minutes = static_cast<int>(seconds) / 60;
+	const int secs = static_cast<int>(seconds) % 60;
+
+	char timeText[32];
+	std::snprintf(timeText, sizeof(timeText), "TIME %02d:%02d", minutes, secs);
+
+	char killText[32];
+	std::snprintf(killText, sizeof(killText), "KILLS %d", kills);
+
+	DrawBitmapText(canvas, panelX + 12, panelY + 9, timeText, 2, 0, 0, 0);
+	DrawBitmapText(canvas, panelX + 11, panelY + 8, timeText, 2, 255, 255, 255);
+
+	DrawBitmapText(canvas, panelX + 12, panelY + 33, killText, 2, 0, 0, 0);
+	DrawBitmapText(canvas, panelX + 11, panelY + 32, killText, 2, 255, 225, 150);
+}
+
 // -----------------------------------------------------------
 
 int main() {
@@ -937,9 +971,9 @@ int main() {
 	// Create a timer object to measure time intervals.
 	GamesEngineeringBase::Timer timer;
 
-	// Create a canvas window with dimensions 1024x768 and title "Tiles"
+	// Create a canvas window with dimensions 1024x768 and title "VillageWatch"
 	GamesEngineeringBase::Window canvas;
-	canvas.create(1024, 768, "Tiles");
+	canvas.create(1024, 768, "VillageWatch");
 
 	// Load the village layout from the map file (see MapFile.h for the format)
 	TileMapEntity world;
@@ -988,8 +1022,10 @@ int main() {
 
 	SpawnerEntity spawners[kSpawnerCount];
 
-	SamuraiEntity hero({ 0.0f, 0.0f });
-	ResetLevel(world, hero, enemies, slotProfile, profiles, spawners);
+	SamuraiEntity samurai({ 0.0f, 0.0f });
+	ArcherEntity archer({ 0.0f, 0.0f });
+	PlayerCharacter* selectedPlayer = &samurai;
+	ResetLevel(world, *selectedPlayer, enemies, slotProfile, profiles, spawners);
 
 	// Extra art for the intro screens
 	GamesEngineeringBase::Image samuraiIdle;
@@ -997,6 +1033,13 @@ int main() {
 	if (!samuraiIdle.load("..\\Resources\\samurai\\IDLE.png"))
 	{
 		std::cerr << "Failed to load samurai IDLE.png" << std::endl;
+	}
+
+	GamesEngineeringBase::Image archerSheet;
+
+	if (!archerSheet.load("..\\Resources\\archer\\Archer sheet.png"))
+	{
+		std::cerr << "Failed to load Archer sheet.png" << std::endl;
 	}
 
 	float delta_time = timer.dt(); // Get the elapsed time since the last frame.
@@ -1033,6 +1076,8 @@ int main() {
 
 	while (running)
 	{
+		PlayerCharacter& hero = *selectedPlayer;
+
 		delta_time = timer.dt();
 		++frameCounter;
 
@@ -1082,7 +1127,10 @@ int main() {
 
 				if (enterKey && !enterDown)
 				{
-					StartLevel(world, hero, enemies, slotProfile, profiles, spawners, levelIndex);
+					selectedPlayer = (charIndex == 1) ? static_cast<PlayerCharacter*>(&archer)
+													  : static_cast<PlayerCharacter*>(&samurai);
+
+					StartLevel(world, *selectedPlayer, enemies, slotProfile, profiles, spawners, levelIndex);
 					playTime = 0.0f;
 					endlessTimer = 2.0f;
 					kills = 0;
@@ -1107,11 +1155,11 @@ int main() {
 			}
 			else if (state == kCharSelect)
 			{
-				DrawCharSelectScreen(canvas, samuraiIdle, charIndex, blink);
+				DrawCharSelectScreen(canvas, samuraiIdle, archerSheet, charIndex, blink);
 			}
 			else if (state == kControls)
 			{
-				DrawControlsScreen(canvas, blink);
+				DrawControlsScreen(canvas, charIndex, blink);
 			}
 			else
 			{
@@ -1133,7 +1181,7 @@ int main() {
 
 			if (canvas.keyPressed('R') && !respawnDown)
 			{
-				StartLevel(world, hero, enemies, slotProfile, profiles, spawners, levelIndex);
+				StartLevel(world, *selectedPlayer, enemies, slotProfile, profiles, spawners, levelIndex);
 				playTime = 0.0f;
 					endlessTimer = 2.0f;
 				kills = 0;
@@ -1198,7 +1246,7 @@ int main() {
 		const bool respawnKey = canvas.keyPressed('R');
 
 		if (attackKey && !attackDown) { hero.Attack(); }
-		if (hurtKey && !hurtDown) { hero.TakeDamage(1); }
+		if (hurtKey && !hurtDown) { hero.TakeDamage(2); }
 		if (deathKey && !deathDown) { hero.Die(); }
 
 		if (respawnKey && !respawnDown)
@@ -1225,11 +1273,23 @@ int main() {
 		if (canvas.keyPressed('D')) input.x_ = 1.0f;
 
 		hero.SetInputAxis(input);
-		hero.SetRunning(canvas.keyPressed(VK_SHIFT));
+		hero.SetSkillHeld(canvas.keyPressed(VK_SHIFT));
 
 		const Vec2f previous_feet = hero.GetPosition();
 		hero.Update(delta_time);
 		world.Update(delta_time);
+
+		// Ranged classes release their arrow part way through the shoot animation
+		{
+			Vec2f shotFrom{ 0.0f, 0.0f };
+			Vec2f shotDir{ 1.0f, 0.0f };
+
+			if (hero.WantsArrow(shotFrom, shotDir))
+			{
+				arrows[nextArrow].Spawn(shotFrom, shotDir, kPlayerArrowSpeed, 1, true);
+				nextArrow = (nextArrow + 1) % kArrowCount;
+			}
+		}
 
 		// The whole body box collides with impassable tiles
 		float left = 0.0f, top = 0.0f, right = 0.0f, bottom = 0.0f;
@@ -1263,8 +1323,8 @@ int main() {
 		// Keep the hero body inside the map, the endless map has no edges
 		if (!world.IsInfinite())
 		{
-			const float halfWidth = SamuraiEntity::kBodyW * SamuraiEntity::kScale * 0.5f;
-			const float bodyHeight = SamuraiEntity::kBodyH * SamuraiEntity::kScale;
+			const float halfWidth = PlayerCharacter::kBodyW * PlayerCharacter::kScale * 0.5f;
+			const float bodyHeight = PlayerCharacter::kBodyH * PlayerCharacter::kScale;
 
 			const float minX = halfWidth;
 			const float maxX = static_cast<float>(world.Width() * TileMapEntity::kTile) - halfWidth;
@@ -1369,6 +1429,15 @@ int main() {
 					continue;
 				}
 
+				// Free the pool slot once the death animation has finished,
+				// otherwise dead bodies keep counting towards the enemy cap
+				// and the objectives stop spawning
+				if (enemies[i].IsDead() && enemies[i].ShouldDespawn())
+				{
+					enemies[i].Deactivate();
+					continue;
+				}
+
 				enemies[i].Step(delta_time, hero.GetPosition(), world);
 
 				if (enemies[i].ConsumeShot())
@@ -1405,22 +1474,72 @@ int main() {
 
 				if (overlap && enemies[i].TryDamagePlayer())
 				{
-					hero.TakeDamage(1);
+					hero.TakeDamage(2);
 				}
 			}
 
-			// Arrows ignore terrain, they only stop on the player or on timeout
+			// Arrows ignore terrain. Player arrows hurt enemies and objectives,
+			// enemy arrows hurt the player.
 			for (int i = 0; i < kArrowCount; ++i)
 			{
 				arrows[i].Update(delta_time);
 
-				if (!arrows[i].IsActive() || hero.IsDead())
+				if (!arrows[i].IsActive())
 				{
 					continue;
 				}
 
 				float al = 0.0f, at = 0.0f, ar = 0.0f, ab = 0.0f;
 				arrows[i].HurtBox(al, at, ar, ab);
+
+				if (arrows[i].FromPlayer())
+				{
+					for (int e = 0; e < kMaxEnemies && arrows[i].IsActive(); ++e)
+					{
+						if (!enemies[e].IsActive() || enemies[e].IsDead())
+						{
+							continue;
+						}
+
+						if (enemies[e].TakeArrowHit(al, at, ar, ab))
+						{
+							if (enemies[e].IsDead())
+							{
+								++kills;
+							}
+
+							arrows[i].Deactivate();
+						}
+					}
+
+					if (!world.IsInfinite())
+					{
+						for (int s = 0; s < kSpawnerCount && arrows[i].IsActive(); ++s)
+						{
+							if (!spawners[s].IsAlive())
+							{
+								continue;
+							}
+
+							if (spawners[s].TakeArrowHit(al, at, ar, ab))
+							{
+								if (!spawners[s].IsAlive())
+								{
+									++kills;
+								}
+
+								arrows[i].Deactivate();
+							}
+						}
+					}
+
+					continue;
+				}
+
+				if (hero.IsDead())
+				{
+					continue;
+				}
 
 				const bool overlap = !(ar < heroLeft || al > heroRight || ab < heroTop || at > heroBottom);
 
@@ -1556,6 +1675,7 @@ int main() {
 
 		// HUD: hearts under the frame counter
 		DrawHearts(canvas, uiSheet, 8, 30, hero.Hp(), hero.MaxHp(), 2);
+		DrawRunStats(canvas, playTime, kills);
 
 		// FPS overlay: black shadow first so it stays readable on any terrain
 		fpsAccum += delta_time;

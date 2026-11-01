@@ -350,6 +350,37 @@ public:
 		return true;
 	}
 
+	// Applies one arrow hit (no swing id: every arrow is its own hit)
+	bool TakeArrowHit(float left, float top, float right, float bottom)
+	{
+		if (!active_ || state_ == kDeath)
+		{
+			return false;
+		}
+
+		float hurtLeft = 0.0f, hurtTop = 0.0f, hurtRight = 0.0f, hurtBottom = 0.0f;
+		BodyBox(hurtLeft, hurtTop, hurtRight, hurtBottom);
+
+		if (right < hurtLeft || left > hurtRight || bottom < hurtTop || top > hurtBottom)
+		{
+			return false;
+		}
+
+		--hp_;
+
+		if (hp_ <= 0)
+		{
+			hp_ = 0;
+			SetState(kDeath);
+		}
+		else
+		{
+			SetState(kHurt);
+		}
+
+		return true;
+	}
+
 	// Applies one sword hit if the boxes overlap and this swing has not hit yet
 	bool TryHit(int swingId, float left, float top, float right, float bottom)
 	{

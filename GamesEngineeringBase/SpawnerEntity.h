@@ -103,6 +103,34 @@ public:
 		return true;
 	}
 
+	// Arrow hit: every arrow counts as its own hit
+	bool TakeArrowHit(float left, float top, float right, float bottom)
+	{
+		if (!alive_)
+		{
+			return false;
+		}
+
+		float hl = 0.0f, ht = 0.0f, hr = 0.0f, hb = 0.0f;
+		BodyBox(hl, ht, hr, hb);
+
+		if (right < hl || left > hr || bottom < ht || top > hb)
+		{
+			return false;
+		}
+
+		--hp_;
+		flash_ = 0.18f;
+
+		if (hp_ <= 0)
+		{
+			hp_ = 0;
+			alive_ = false;
+		}
+
+		return true;
+	}
+
 	// Solid base, the player cannot walk through the slab
 	void BodyBox(float& left, float& top, float& right, float& bottom) const
 	{
