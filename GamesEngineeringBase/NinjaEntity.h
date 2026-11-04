@@ -363,7 +363,7 @@ public:
 	}
 
 	// Applies one arrow hit (no swing id: every arrow is its own hit)
-	bool TakeArrowHit(float left, float top, float right, float bottom)
+	bool TakeArrowHit(float left, float top, float right, float bottom, int damage = 1)
 	{
 		if (!active_ || state_ == kDeath)
 		{
@@ -378,7 +378,7 @@ public:
 			return false;
 		}
 
-		--hp_;
+		hp_ -= damage;
 
 		if (hp_ <= 0)
 		{
@@ -391,6 +391,13 @@ public:
 		}
 
 		return true;
+	}
+
+	// Killed outright by the mage ultimate
+	void Kill()
+	{
+		hp_ = 0;
+		SetState(kDeath);
 	}
 
 	// Applies one sword hit if the boxes overlap and this swing has not hit yet

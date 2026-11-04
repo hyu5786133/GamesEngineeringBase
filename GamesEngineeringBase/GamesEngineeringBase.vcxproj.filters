@@ -29,6 +29,15 @@
     <ClInclude Include="PlayerCharacter.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="MageEntity.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="StarEntity.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="UltEffect.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="ArrowEntity.h">
       <Filter>Header Files</Filter>
     </ClInclude>

@@ -36,8 +36,18 @@ public:
 	virtual void AttackBox(float& left, float& top, float& right, float& bottom) const = 0;
 	virtual int SwingId() const = 0;
 
-	// Ranged classes return true once per shot and fill in the arrow spawn data
+	// Ranged classes return true once per shot and fill in the projectile data
 	virtual bool WantsArrow(Vec2f& origin, Vec2f& direction) { return false; }
+
+	// Mage fires stars instead of arrows
+	virtual bool UsesStars() const { return false; }
+
+	// Mage ultimate: true once when the skill key is pressed
+	virtual bool WantsUlt() { return false; }
+
+	// HUD support for classes with an ultimate
+	virtual bool HasUltimate() const { return false; }
+	virtual float UltCooldown() const { return 0.0f; }
 
 	// halfHearts is the raw damage: 2 = one full heart
 	virtual bool TakeDamage(int halfHearts) = 0;

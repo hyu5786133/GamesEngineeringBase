@@ -13,6 +13,9 @@
 #include "PlayerCharacter.h" // Shared interface for the playable classes
 #include "SamuraiEntity.h" // Include the samurai
 #include "ArcherEntity.h" // Include the archer
+#include "MageEntity.h" // Include the mage
+#include "StarEntity.h" // Mage projectiles
+#include "UltEffect.h" // Mage ultimate effect
 #include "NinjaEntity.h" // Include the enemy types
 #include "ArrowEntity.h" // Include the archer projectiles
 #include "SpawnerEntity.h" // Include the destroyable objectives
@@ -31,6 +34,9 @@
 
 static const int kMaxEnemies = 16;
 static const int kArrowCount = 8;
+static const int kStarCount = 8;
+static const int kUltCount = 4;
+static const float kStarSpeed = 300.0f;
 static const float kArrowSpeed = 260.0f;
 static const float kPlayerArrowSpeed = 340.0f;
 static const char* kSavePath = "..\\Resources\\savegame.dat";
@@ -65,7 +71,7 @@ static const int kCharacterCount = 3;
 static const CharacterDef kCharacters[kCharacterCount] = {
 	{ "SAMURAI", "MELEE",       "RUN",   false },
 	{ "ARCHER",  "RANGED",      "GUARD", false },
-	{ "MAGE",    "SPELLCASTER", "LATER", true }
+	{ "MAGE",    "SPELLCASTER", "ULT",   false }
 };
 
 // Stages that can be picked at the end of the intro
@@ -114,6 +120,23 @@ static const Vec2f kSpawnerPositions[kSpawnerCount] = {
 	{  220.0f, 700.0f },
 	{ 1350.0f, 250.0f }
 };
+
+// Character select returns one of the three playable classes
+static PlayerCharacter* PickPlayer(int index, SamuraiEntity& samurai,
+	ArcherEntity& archer, MageEntity& mage)
+{
+	if (index == 1)
+	{
+		return &archer;
+	}
+
+	if (index == 2)
+	{
+		return &mage;
+	}
+
+	return &samurai;
+}
 
 // One entry per sprite that has to be drawn with depth sorting
 struct DrawItem
@@ -426,11 +449,12 @@ static void DrawBlockedOverlay(const TileMapEntity& world, GamesEngineeringBase:
 // Terrain plus every actor, sorted by the line their feet stand on
 static void DrawStage(GamesEngineeringBase::Window& canvas, TileMapEntity& world,
 	PlayerCharacter& hero, NinjaEntity enemies[kMaxEnemies],
-	ArrowEntity arrows[kArrowCount], SpawnerEntity spawners[kSpawnerCount])
+	ArrowEntity arrows[kArrowCount], StarEntity stars[kStarCount],
+	UltEffect ults[kUltCount], SpawnerEntity spawners[kSpawnerCount])
 {
 	world.DrawTerrain(canvas);
 
-	DrawItem drawList[220];
+	DrawItem drawList[240];
 	int drawCount = 0;
 
 	if (!world.IsInfinite())
@@ -467,6 +491,19 @@ static void DrawStage(GamesEngineeringBase::Window& canvas, TileMapEntity& world
 
 		drawList[drawCount].baseY = arrows[i].Position().y_;
 		drawList[drawCount].kind = 3;
+		drawList[drawCount].index = i;
+		++drawCount;
+	}
+
+	for (int i = 0; i < kStarCount; ++i)
+	{
+		if (!stars[i].IsActive())
+		{
+			continue;
+		}
+
+		drawList[drawCount].baseY = stars[i].Position().y_;
+		drawList[drawCount].kind = 5;
 		drawList[drawCount].index = i;
 		++drawCount;
 	}
@@ -526,10 +563,20 @@ static void DrawStage(GamesEngineeringBase::Window& canvas, TileMapEntity& world
 		{
 			spawners[item.index].Draw(canvas);
 		}
+		else if (item.kind == 5)
+		{
+			stars[item.index].Draw(canvas);
+		}
 		else
 		{
 			hero.Draw(canvas);
 		}
+	}
+
+	// Ultimate effects always sit on top of everything
+	for (int i = 0; i < kUltCount; ++i)
+	{
+		ults[i].Draw(canvas);
 	}
 }
 
@@ -712,7 +759,8 @@ static void DrawIntroScreen(GamesEngineeringBase::Window& canvas,
 
 static void DrawCharSelectScreen(GamesEngineeringBase::Window& canvas,
 	const GamesEngineeringBase::Image& samuraiPortrait,
-	const GamesEngineeringBase::Image& archerPortrait, int selected, bool blink)
+	const GamesEngineeringBase::Image& archerPortrait,
+	const GamesEngineeringBase::Image& magePortrait, int selected, bool blink)
 {
 	DrawUIGradient(canvas);
 
@@ -738,18 +786,37 @@ static void DrawCharSelectScreen(GamesEngineeringBase::Window& canvas,
 		}
 		else
 		{
-			// Both idle frames only hold a small character, so crop to it
-			const int srcX = (i == 0) ? 36 : 10;
-			const int srcY = (i == 0) ? 47 : 21;
-			const int srcW = (i == 0) ? 20 : 32;
-			const int srcH = (i == 0) ? 34 : 43;
-			const int portraitScale = (i == 0) ? 5 : 4;
+			// Each idle frame only holds a small character, so crop to it
+			int srcX = 36;
+			int srcY = 47;
+			int srcW = 20;
+			int srcH = 34;
+			int portraitScale = 5;
+			const GamesEngineeringBase::Image* portrait = &samuraiPortrait;
 
-			const GamesEngineeringBase::Image& portrait = (i == 0) ? samuraiPortrait : archerPortrait;
-
-			if (portrait.data != nullptr)
+			if (i == 1)
 			{
-				Renderer_blit_scaled(canvas, portrait, srcX, srcY, srcW, srcH,
+				srcX = 10;
+				srcY = 21;
+				srcW = 32;
+				srcH = 43;
+				portraitScale = 4;
+				portrait = &archerPortrait;
+			}
+			else if (i == 2)
+			{
+				// Same row the mage draws while standing in game
+				srcX = 21;
+				srcY = 3 * 64 + 12;
+				srcW = 26;
+				srcH = 29;
+				portraitScale = 5;
+				portrait = &magePortrait;
+			}
+
+			if (portrait->data != nullptr)
+			{
+				Renderer_blit_scaled(canvas, *portrait, srcX, srcY, srcW, srcH,
 					x + (cardW - srcW * portraitScale) / 2, cardY + 24, portraitScale, false);
 			}
 		}
@@ -790,6 +857,7 @@ static void DrawControlsScreen(GamesEngineeringBase::Window& canvas, int charact
 	DrawUIGradient(canvas);
 
 	const bool archer = (characterIndex == 1);
+	const bool mageChar = (characterIndex == 2);
 
 	DrawTextCentered(canvas, 60, kCharacters[characterIndex].name, 4, 255, 210, 90);
 	DrawTextCentered(canvas, 128, "CONTROLS", 2, 200, 200, 210);
@@ -802,8 +870,8 @@ static void DrawControlsScreen(GamesEngineeringBase::Window& canvas, int charact
 
 	const Row rows[] = {
 		{ "WASD", "MOVE" },
-		{ "J", archer ? "SHOOT" : "ATTACK" },
-		{ "SHIFT", archer ? "GUARD  (SKILL)" : "RUN  (SKILL)" },
+		{ "J", mageChar ? "CAST" : (archer ? "SHOOT" : "ATTACK") },
+		{ "SHIFT", mageChar ? "ULT  (SKILL)" : (archer ? "GUARD  (SKILL)" : "RUN  (SKILL)") },
 		{ "R", "RESTART LEVEL" },
 		{ "ESC", "BACK TO MENU" }
 	};
@@ -1072,10 +1140,27 @@ int main() {
 		arrows[i].Init("..\\Resources\\GreenNinja\\GreenNinja - arrow.png");
 	}
 
+	StarEntity stars[kStarCount];
+	int nextStar = 0;
+
+	for (int i = 0; i < kStarCount; ++i)
+	{
+		stars[i].Init("..\\Resources\\magic star.png");
+	}
+
+	UltEffect ults[kUltCount];
+	int nextUlt = 0;
+
+	for (int i = 0; i < kUltCount; ++i)
+	{
+		ults[i].Init("..\\Resources\\ult magic.png");
+	}
+
 	SpawnerEntity spawners[kSpawnerCount];
 
 	SamuraiEntity samurai({ 0.0f, 0.0f });
 	ArcherEntity archer({ 0.0f, 0.0f });
+	MageEntity mage({ 0.0f, 0.0f });
 	PlayerCharacter* selectedPlayer = &samurai;
 	ResetLevel(world, *selectedPlayer, enemies, slotProfile, profiles, spawners);
 
@@ -1092,6 +1177,13 @@ int main() {
 	if (!archerSheet.load("..\\Resources\\archer\\Archer sheet.png"))
 	{
 		std::cerr << "Failed to load Archer sheet.png" << std::endl;
+	}
+
+	GamesEngineeringBase::Image mageSheet;
+
+	if (!mageSheet.load("..\\Resources\\mage\\marisa.png"))
+	{
+		std::cerr << "Failed to load marisa.png" << std::endl;
 	}
 
 	float delta_time = timer.dt(); // Get the elapsed time since the last frame.
@@ -1223,8 +1315,7 @@ int main() {
 
 				if (confirm)
 				{
-					selectedPlayer = (charIndex == 1) ? static_cast<PlayerCharacter*>(&archer)
-													  : static_cast<PlayerCharacter*>(&samurai);
+					selectedPlayer = PickPlayer(charIndex, samurai, archer, mage);
 
 					StartLevel(world, *selectedPlayer, enemies, slotProfile, profiles, spawners, levelIndex);
 
@@ -1257,7 +1348,7 @@ int main() {
 				break;
 
 			case kCharSelect:
-				DrawCharSelectScreen(canvas, samuraiIdle, archerSheet, charIndex, blink);
+				DrawCharSelectScreen(canvas, samuraiIdle, archerSheet, mageSheet, charIndex, blink);
 				break;
 
 			case kControls:
@@ -1302,7 +1393,7 @@ int main() {
 			world.FollowCamera(hero.BodyCentre(), canvas);
 			game::camera = world.Camera();
 
-			DrawStage(canvas, world, hero, enemies, arrows, spawners);
+			DrawStage(canvas, world, hero, enemies, arrows, stars, ults, spawners);
 			DrawResults(canvas, state == kVictory, playTime, kills);
 			canvas.present();
 			continue;
@@ -1386,8 +1477,7 @@ int main() {
 				{
 					charIndex = data.charIndex;
 					levelIndex = data.levelIndex;
-					selectedPlayer = (charIndex == 1) ? static_cast<PlayerCharacter*>(&archer)
-													  : static_cast<PlayerCharacter*>(&samurai);
+					selectedPlayer = PickPlayer(charIndex, samurai, archer, mage);
 
 					StartLevel(world, *selectedPlayer, enemies, slotProfile, profiles, spawners, levelIndex);
 
@@ -1441,7 +1531,7 @@ int main() {
 			world.FollowCamera(hero.BodyCentre(), canvas);
 			game::camera = world.Camera();
 
-			DrawStage(canvas, world, hero, enemies, arrows, spawners);
+			DrawStage(canvas, world, hero, enemies, arrows, stars, ults, spawners);
 			DrawHearts(canvas, uiSheet, 8, 30, hero.Hp(), hero.MaxHp(), 2);
 			DrawRunStats(canvas, playTime, kills);
 			DrawPauseOverlay(canvas, saveMessage);
@@ -1519,15 +1609,55 @@ int main() {
 		hero.Update(delta_time);
 		world.Update(delta_time);
 
-		// Ranged classes release their arrow part way through the shoot animation
+		// Ranged classes release their projectile part way through the animation
 		{
 			Vec2f shotFrom{ 0.0f, 0.0f };
 			Vec2f shotDir{ 1.0f, 0.0f };
 
 			if (hero.WantsArrow(shotFrom, shotDir))
 			{
-				arrows[nextArrow].Spawn(shotFrom, shotDir, kPlayerArrowSpeed, 1, true);
-				nextArrow = (nextArrow + 1) % kArrowCount;
+				if (hero.UsesStars())
+				{
+					stars[nextStar].Spawn(shotFrom, shotDir, kStarSpeed, 2);
+					nextStar = (nextStar + 1) % kStarCount;
+				}
+				else
+				{
+					arrows[nextArrow].Spawn(shotFrom, shotDir, kPlayerArrowSpeed, 1, true);
+					nextArrow = (nextArrow + 1) % kArrowCount;
+				}
+			}
+
+			// Mage ultimate: delete the toughest enemy on the field
+			if (hero.WantsUlt())
+			{
+				int best = -1;
+				int bestHp = 0;
+
+				for (int i = 0; i < kMaxEnemies; ++i)
+				{
+					if (!enemies[i].IsActive() || enemies[i].IsDead())
+					{
+						continue;
+					}
+
+					if (enemies[i].Hp() > bestHp)
+					{
+						bestHp = enemies[i].Hp();
+						best = i;
+					}
+				}
+
+				if (best >= 0)
+				{
+					const Vec2f victim = enemies[best].GetPosition();
+
+					ults[nextUlt].Spawn({ victim.x_, victim.y_ - 26.0f });
+					nextUlt = (nextUlt + 1) % kUltCount;
+
+					enemies[best].Kill();
+					++kills;
+				}
 			}
 		}
 
@@ -1790,6 +1920,64 @@ int main() {
 				}
 			}
 
+			// Magic stars: 2 damage per hit, otherwise the same rules as arrows
+			for (int i = 0; i < kStarCount; ++i)
+			{
+				stars[i].Update(delta_time);
+
+				if (!stars[i].IsActive())
+				{
+					continue;
+				}
+
+				float sl = 0.0f, st = 0.0f, sr = 0.0f, sb = 0.0f;
+				stars[i].HurtBox(sl, st, sr, sb);
+
+				for (int e = 0; e < kMaxEnemies && stars[i].IsActive(); ++e)
+				{
+					if (!enemies[e].IsActive() || enemies[e].IsDead())
+					{
+						continue;
+					}
+
+					if (enemies[e].TakeArrowHit(sl, st, sr, sb, stars[i].Damage()))
+					{
+						if (enemies[e].IsDead())
+						{
+							++kills;
+						}
+
+						stars[i].Deactivate();
+					}
+				}
+
+				if (!world.IsInfinite())
+				{
+					for (int sp = 0; sp < kSpawnerCount && stars[i].IsActive(); ++sp)
+					{
+						if (!spawners[sp].IsAlive())
+						{
+							continue;
+						}
+
+						if (spawners[sp].TakeArrowHit(sl, st, sr, sb, stars[i].Damage()))
+						{
+							if (!spawners[sp].IsAlive())
+							{
+								++kills;
+							}
+
+							stars[i].Deactivate();
+						}
+					}
+				}
+			}
+
+			for (int i = 0; i < kUltCount; ++i)
+			{
+				ults[i].Update(delta_time);
+			}
+
 			// Simple separation so enemies do not stack on each other
 			for (int a = 0; a < kMaxEnemies; ++a)
 			{
@@ -1894,7 +2082,7 @@ int main() {
 
 		// Terrain first, then props and every actor in one depth sorted list
 		// (this also freezes the frame behind the results panel)
-		DrawStage(canvas, world, hero, enemies, arrows, spawners);
+		DrawStage(canvas, world, hero, enemies, arrows, stars, ults, spawners);
 
 		// Hold B to see the collision box, V for the sword hit box, G for tiles
 		if (canvas.keyPressed('B'))
@@ -1916,6 +2104,26 @@ int main() {
 		// HUD: hearts under the frame counter
 		DrawHearts(canvas, uiSheet, 8, 30, hero.Hp(), hero.MaxHp(), 2);
 		DrawRunStats(canvas, playTime, kills);
+
+		// Ultimate cooldown, only for classes that have one
+		if (hero.HasUltimate())
+		{
+			char ultText[24];
+			const float remaining = hero.UltCooldown();
+
+			if (remaining > 0.0f)
+			{
+				std::snprintf(ultText, sizeof(ultText), "ULT %dS", static_cast<int>(remaining + 0.99f));
+				DrawBitmapText(canvas, 9, 65, ultText, 2, 0, 0, 0);
+				DrawBitmapText(canvas, 8, 64, ultText, 2, 175, 175, 175);
+			}
+			else
+			{
+				std::snprintf(ultText, sizeof(ultText), "ULT READY");
+				DrawBitmapText(canvas, 9, 65, ultText, 2, 0, 0, 0);
+				DrawBitmapText(canvas, 8, 64, ultText, 2, 150, 235, 150);
+			}
+		}
 
 		// FPS overlay: black shadow first so it stays readable on any terrain
 		fpsAccum += delta_time;

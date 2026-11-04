@@ -92,7 +92,7 @@ public:
 		}
 
 		lastSwing_ = swingId;
-		--hp_;
+		hp_ -= 1;
 		flash_ = 0.18f;
 
 		if (hp_ <= 0)
@@ -105,7 +105,7 @@ public:
 	}
 
 	// Arrow hit: every arrow counts as its own hit
-	bool TakeArrowHit(float left, float top, float right, float bottom)
+	bool TakeArrowHit(float left, float top, float right, float bottom, int damage = 1)
 	{
 		if (!alive_)
 		{
@@ -120,7 +120,7 @@ public:
 			return false;
 		}
 
-		--hp_;
+		hp_ -= damage;
 		flash_ = 0.18f;
 
 		if (hp_ <= 0)
